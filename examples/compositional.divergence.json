@@ -5,8 +5,8 @@
     {
       "finding_id": "URD-0001",
       "severity": "medium",
-      "title": "Untrusted external data reached a server tool call: untrusted_source:public_weather_feed \u2192 server:weather:None",
-      "description": "Marker URD-MARKER-ae9d88eb-8452-48b7-87f5-a5bb83eef820 originated at untrusted_source:public_weather_feed (external/untrusted) and appeared in a tool_call on server:weather:None (privilege=low).",
+      "title": "Untrusted external data reached a server tool call: untrusted_source:public_weather_feed \u2192 server:weather",
+      "description": "Marker URD-MARKER-ae9d88eb-8452-48b7-87f5-a5bb83eef820 originated at untrusted_source:public_weather_feed (external/untrusted) and appeared in a tool_call on server:weather (privilege=low).",
       "observed_edge": {
         "src": "untrusted_source:public_weather_feed",
         "dst": "server:weather",
