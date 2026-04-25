@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "urd"
+version = "0.1.0"
+description = "Compositional trust analysis for Model Context Protocol deployments"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Red Asgard" },
+]
+keywords = ["mcp", "security", "agent", "trust-graph", "compositional-analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "mcp>=1.0.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff",
+]
+
+[project.urls]
+Homepage = "https://github.com/redasgard/urd"
+Repository = "https://github.com/redasgard/urd"
+
+[project.scripts]
+urd = "urd.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["urd", "lab"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
