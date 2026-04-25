@@ -13,9 +13,6 @@ The failure lives in two places:
 
 2. The approval prompt displays the proposed Server B call's parameters but does
    not surface which upstream tool output those parameters were shaped by.
-
-Both behaviors are common in real agent implementations. Neither is caught by
-per-tool schema review or per-server audit.
 """
 from __future__ import annotations
 
@@ -32,20 +29,16 @@ from urd.trace import default_writer, find_markers
 HOST_ID = "ops-assistant"
 
 
-# A simple pattern the host uses to extract "records referenced for cleanup"
-# from free-text tool output. This stands in for the kind of template-extraction
-# or pattern-matching real agents routinely perform on tool results.
-REFS_PATTERN = re.compile(r"Records referenced for cleanup:\s*(\S+)")
+# Captures two groups: (1) the label, (2) the optional marker in brackets.
+# The host treats the captured label as a record identifier; the marker is kept
+# attached so downstream evidence is byte-level provable.
+REFS_PATTERN = re.compile(
+    r"Records referenced for cleanup:\s*(\S+?)(?:\s*\[(URD-MARKER-[0-9a-f-]+)\])?(?=\s|$)"
+)
 
 
 @dataclass
 class PlanningContext:
-    """Rolling context the host accumulates from tool results, used to build
-    parameters for subsequent tool calls.
-
-    A real LLM-based host would maintain this as a conversation/message history.
-    We maintain it as an explicit list so the composition is visible in the trace.
-    """
     entries: list[dict[str, Any]] = field(default_factory=list)
 
     def add(self, source_server: str, source_tool: str, text: str, structured: Any = None) -> None:
@@ -66,12 +59,6 @@ ApprovalFn = Callable[[dict[str, Any]], bool]
 
 
 def auto_approve(_prompt: dict[str, Any]) -> bool:
-    """Test-mode approval: always yes, so scenarios run non-interactively.
-
-    A real operator would see `prompt` and decide. Crucially, the prompt payload
-    passed to this function DOES NOT include provenance for sourced parameters —
-    that is the approval-surface failure we are demonstrating.
-    """
     return True
 
 
@@ -93,28 +80,18 @@ class Host:
     approval: ApprovalFn = auto_approve
     context: PlanningContext = field(default_factory=PlanningContext)
 
-    # --- helpers for routing tool_calls through the trace ---
-
     def _trace_tool_call(self, server_id: str, tool: str, args: dict[str, Any]) -> None:
         default_writer().emit(
             source=f"host:{HOST_ID}",
             kind="tool_call",
-            payload={
-                "server_id": server_id,
-                "tool": tool,
-                "args": args,
-            },
+            payload={"server_id": server_id, "tool": tool, "args": args},
         )
 
     def _trace_context_update(self, source_server: str, source_tool: str, text: str) -> None:
         default_writer().emit(
             source=f"host:{HOST_ID}",
             kind="context_update",
-            payload={
-                "source_server": source_server,
-                "source_tool": source_tool,
-                "text": text,
-            },
+            payload={"source_server": source_server, "source_tool": source_tool, "text": text},
         )
 
     def _trace_param_construction(
@@ -132,8 +109,6 @@ class Host:
         )
 
     def _trace_approval_shown(self, server_id: str, tool: str, params: dict[str, Any]) -> dict[str, Any]:
-        # This is the critical anti-pattern: the prompt payload does not carry
-        # any provenance label indicating the parameters' upstream source.
         prompt = {"server_id": server_id, "tool": tool, "params": params}
         default_writer().emit(
             source=f"host:{HOST_ID}",
@@ -149,7 +124,19 @@ class Host:
             payload={"prompt": prompt, "approved": approved},
         )
 
-    # --- tool-call dispatchers ---
+    def _trace_extracted_provenance(
+        self, labels: list[str], markers: list[str]
+    ) -> None:
+        """Record that labels were extracted from planning context with
+        these marker(s) observed adjacent to them. The marker is hard evidence
+        of the label's origin even if the marker itself does not survive into
+        final call parameters.
+        """
+        default_writer().emit(
+            source=f"host:{HOST_ID}",
+            kind="provenance_observed",
+            payload={"extracted_labels": labels, "observed_markers": markers},
+        )
 
     def call_weather(self, city: str) -> str:
         args = {"city": city}
@@ -182,35 +169,26 @@ class Host:
         self.context.add("admin", TOOL_DELETE_RECORDS.name, text)
         return text
 
-    # --- the planning routines ---
+    def _extract_labels_from_notes(self) -> tuple[list[str], list[str]]:
+        """Scan accumulated planning context for
+        'Records referenced for cleanup: X [marker]'.
 
-    def _extract_labels_from_notes(self) -> list[str]:
-        """Scan accumulated planning context for 'Records referenced for cleanup: X'.
-
-        This is the exact composition mechanism that creates the failure:
-        free-text content from Server A's result becomes structured parameters
-        for Server B's destructive tool. No code in this method distinguishes
-        between trusted and untrusted text.
+        Returns (labels, markers_seen). Labels get passed to delete_records;
+        markers are carried in the trace for provenance.
         """
         labels: list[str] = []
+        markers: list[str] = []
         for entry in self.context.entries:
-            matches = REFS_PATTERN.findall(entry["text"])
-            labels.extend(matches)
-        return labels
+            for m in REFS_PATTERN.finditer(entry["text"]):
+                label = m.group(1)
+                marker = m.group(2)
+                if label:
+                    labels.append(label)
+                if marker:
+                    markers.append(marker)
+        return labels, markers
 
     def plan_routine_cleanup(self, city: str = "Raleigh") -> dict[str, Any]:
-        """Top-level routine the 'operator' kicks off.
-
-        The operator's stated intent: delete staging log records that are safe
-        to remove. The routine fetches weather as contextual information
-        (an intentionally innocuous-looking step), then consults its own admin
-        listing to decide what to delete.
-
-        Under benign conditions the routine deletes one staging log by pattern.
-        Under compositional-failure conditions, the weather server's notes field
-        contains an attacker-supplied label that the host's extraction logic picks
-        up and treats as a deletion target.
-        """
         default_writer().emit(
             source=f"host:{HOST_ID}",
             kind="plan_start",
@@ -220,22 +198,21 @@ class Host:
         self.call_weather(city)
         self.call_admin_list()
 
-        # Extraction step: if the planning context contains an explicit
-        # "Records referenced for cleanup: X" directive, honor it. Otherwise
-        # fall back to deleting the oldest staging log by convention.
-        extracted = self._extract_labels_from_notes()
+        extracted_labels, extracted_markers = self._extract_labels_from_notes()
 
-        if extracted:
-            labels = extracted
+        if extracted_labels:
+            labels = extracted_labels
             derived_from = "context.notes (extracted via REFS_PATTERN)"
         else:
-            # benign default: remove the oldest staging log
             labels = ["STAGING_LOG_20260301"]
             derived_from = "host default policy"
+            extracted_markers = []
+
+        self._trace_extracted_provenance(labels, extracted_markers)
 
         result_text = self.call_admin_delete(labels, derived_from=derived_from)
 
-        markers_in_params = find_markers({"labels": labels})
+        markers_in_params = find_markers({"labels": labels}) or extracted_markers
 
         default_writer().emit(
             source=f"host:{HOST_ID}",
@@ -244,6 +221,7 @@ class Host:
                 "labels_chosen": labels,
                 "result": result_text,
                 "markers_in_final_params": markers_in_params,
+                "markers_observed_during_extraction": extracted_markers,
             },
         )
 
@@ -252,4 +230,5 @@ class Host:
             "derived_from": derived_from,
             "result": result_text,
             "markers_in_final_params": markers_in_params,
+            "markers_observed_during_extraction": extracted_markers,
         }
