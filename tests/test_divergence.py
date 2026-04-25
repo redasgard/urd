@@ -75,34 +75,52 @@ def test_compositional_produces_high_severity_finding(tmp_path: Path):
     assert f.observed_edge["dst_tool"] == "delete_records"
     assert f.observed_edge["marker"].startswith("URD-MARKER-")
 
-
 def test_marker_reaches_delete_records_tool_call(tmp_path: Path):
+    """Provenance must be mechanically provable AND impact must be real."""
     trace_path = _run_scenario("mechanical_proof", inject_marker=True, tmp_path=tmp_path)
     events = read_trace(trace_path)
 
-    # Find the tool_call for admin:delete_records and confirm it carries the
-    # marker the untrusted source originally emitted.
+    # 1. Untrusted source emitted a marker + target label
     untrusted_markers: set[str] = set()
+    injected_labels: set[str] = set()
     for ev in events:
         if ev["kind"] == "untrusted_source_emit" and ev["payload"].get("variant") == "marker":
             untrusted_markers.add(ev["payload"]["marker"])
+            injected_labels.add(ev["payload"]["target_label"])
+    assert untrusted_markers
+    assert injected_labels
 
-    delete_call_markers: set[str] = set()
+    # 2. Marker observed adjacent to extracted label at planning stage
+    provenance_events = [e for e in events if e["kind"] == "provenance_observed"]
+    assert provenance_events
+    observed_markers: set[str] = set()
+    observed_labels: set[str] = set()
+    for ev in provenance_events:
+        observed_markers.update(ev["payload"].get("observed_markers", []))
+        observed_labels.update(ev["payload"].get("extracted_labels", []))
+    assert untrusted_markers & observed_markers
+    assert injected_labels & observed_labels
+
+    # 3. Injected label reached delete_records parameters
+    delete_call_labels: set[str] = set()
     for ev in events:
         if (
             ev["kind"] == "tool_call"
             and ev["payload"].get("server_id") == "admin"
             and ev["payload"].get("tool") == "delete_records"
         ):
-            delete_call_markers.update(ev.get("provenance", []))
+            delete_call_labels.update(ev["payload"].get("args", {}).get("labels", []))
+    assert injected_labels & delete_call_labels
 
-    assert untrusted_markers, "expected untrusted source to emit at least one marker"
-    assert untrusted_markers & delete_call_markers, (
-        "expected the untrusted source's marker to appear verbatim in the "
-        f"admin:delete_records tool_call. untrusted={untrusted_markers} "
-        f"delete_call={delete_call_markers}"
-    )
-
+    # 4. Real impact: deletion occurred
+    exec_events = [
+        e for e in events
+        if e["kind"] == "tool_execution"
+        and e["payload"].get("tool") == "delete_records"
+    ]
+    assert exec_events
+    total_deleted = sum(ev["payload"].get("deleted_count", 0) for ev in exec_events)
+    assert total_deleted > 0
 
 def test_approval_shown_event_omits_provenance(tmp_path: Path):
     trace_path = _run_scenario("approval_check", inject_marker=True, tmp_path=tmp_path)

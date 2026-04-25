@@ -1,12 +1,9 @@
 """
 Runtime analysis: build the observed trust graph from a JSONL trace.
 
-The core technique is marker-token propagation. When the untrusted source emits a value,
-it attaches a unique marker. When that marker appears in a subsequent tool_call payload,
-we have hard evidence that the upstream output influenced the downstream call.
-
-This is deliberate: it removes any argument about intent or interpretation. Either the
-marker is present in downstream parameters (observed edge exists) or it is not.
+Two propagation signals:
+  1. Marker tokens embedded verbatim in payloads.
+  2. Extracted labels with marker provenance (via provenance_observed events).
 """
 from __future__ import annotations
 
@@ -19,23 +16,21 @@ from urd.trace import find_markers, read_trace
 
 @dataclass
 class MarkerOrigin:
-    """Where a marker token was first observed."""
     marker: str
-    source: str           # e.g. "server:weather" or "untrusted_source:feed"
-    kind: str             # event kind at origin
+    source: str
+    kind: str
     seq: int
-    payload_path: str     # shallow indication of where in payload it appeared
+    payload_path: str
 
 
 @dataclass
 class ObservedEdge:
-    """A cross-component authority edge reconstructed from the trace."""
-    src: str                      # originating component (where the marker first appeared)
-    dst: str                      # destination component (where it next appeared)
-    marker: str                   # the specific marker token that traveled
+    src: str
+    dst: str
+    marker: str
     src_event_seq: int
     dst_event_seq: int
-    dst_tool: str | None = None   # when dst is a tool_call, which tool
+    dst_tool: str | None = None
     evidence_payload_excerpt: str = ""
 
     def as_dict(self) -> dict[str, Any]:
@@ -57,7 +52,6 @@ class ObservedGraph:
 
 
 def _excerpt(payload: dict[str, Any], marker: str, max_len: int = 140) -> str:
-    """Find a short substring of the payload containing the marker for evidence."""
     import json as _json
     text = _json.dumps(payload, separators=(",", ":"))
     idx = text.find(marker)
@@ -70,33 +64,37 @@ def _excerpt(payload: dict[str, Any], marker: str, max_len: int = 140) -> str:
     return f"{prefix}{text[start:end]}{suffix}"[:max_len + 2]
 
 
-def build_observed_graph(trace_path: Path) -> ObservedGraph:
-    """Reconstruct the observed trust graph from a single JSONL trace file.
+def _iter_string_values(value: Any) -> list[str]:
+    """Collect all string leaves from an arbitrary nested value."""
+    out: list[str] = []
 
-    Authority edges are recorded between servers and external sources. Host-internal
-    carriage of a marker (context updates, param construction, etc.) is not modeled
-    as an authority edge by itself — the host is the compositor, not an authority.
-    We track the most recent *server-or-external* carrier of each marker, so a path
-    like `untrusted -> weather -> host -> admin` collapses into two edges
-    `untrusted -> weather` and `weather -> admin`.
-    """
+    def walk(v: Any) -> None:
+        if isinstance(v, str):
+            out.append(v)
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                walk(x)
+
+    walk(value)
+    return out
+
+
+def build_observed_graph(trace_path: Path) -> ObservedGraph:
     events = read_trace(trace_path)
     graph = ObservedGraph()
 
-    # Per-marker rolling state: the last server/external component that carried the
-    # marker. Host-internal events update provenance awareness but do not reset the
-    # carrier.
     last_carrier: dict[str, tuple[str, int]] = {}
+    label_provenance: dict[str, list[str]] = {}
 
     def _edge_component(ev: dict[str, Any]) -> str | None:
-        """Return a server/external component id for edge purposes, or None for
-        host-internal events that should not be treated as carriers."""
         src = ev["source"]
         if src.startswith("untrusted_source:"):
             return src
         if src.startswith("server:"):
             return src
-        # tool_call events emitted by the host count as reaching the destination server
         if ev["kind"] == "tool_call":
             server = ev["payload"].get("server_id")
             if server:
@@ -104,7 +102,26 @@ def build_observed_graph(trace_path: Path) -> ObservedGraph:
         return None
 
     for ev in events:
-        markers_here = ev.get("provenance", []) or find_markers(ev.get("payload", {}))
+        if ev["kind"] == "provenance_observed":
+            labels = ev["payload"].get("extracted_labels", []) or []
+            markers = ev["payload"].get("observed_markers", []) or []
+            for lbl in labels:
+                label_provenance.setdefault(lbl, []).extend(markers)
+            continue
+
+        markers_here = list(ev.get("provenance", []) or find_markers(ev.get("payload", {})))
+
+        # Synthetic marker detection via label propagation: if a tool_call's
+        # args contain a label that was previously extracted alongside a marker,
+        # treat that marker as present here for edge purposes.
+        if ev["kind"] == "tool_call":
+            args = ev["payload"].get("args", {}) or {}
+            for arg_value in _iter_string_values(args):
+                if arg_value in label_provenance:
+                    for m in label_provenance[arg_value]:
+                        if m not in markers_here:
+                            markers_here.append(m)
+
         if not markers_here:
             continue
 
@@ -125,7 +142,6 @@ def build_observed_graph(trace_path: Path) -> ObservedGraph:
                 continue
 
             if component is None:
-                # host-internal event carrying a known marker; don't treat as authority hop
                 continue
 
             prev = last_carrier.get(marker)
