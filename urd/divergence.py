@@ -42,6 +42,11 @@ def _privilege_rank(priv: str | None) -> int:
     return {"low": 1, "medium": 2, "high": 3}.get(priv or "", 0)
 
 
+def _tool_suffix(dst_tool: str | None) -> str:
+    """Render `:tool` only when a destination tool is known."""
+    return f":{dst_tool}" if dst_tool else ""
+
+
 def compute_findings(declared: DeclaredGraph, observed: ObservedGraph) -> list[Finding]:
     """Walk observed edges, emit findings for authority paths not covered by the
     declared graph.
@@ -90,11 +95,11 @@ def compute_findings(declared: DeclaredGraph, observed: ObservedGraph) -> list[F
             severity: Severity = "high"
             title = (
                 f"Untrusted external data reached high-privilege tool call: "
-                f"{edge.src} → {edge.dst}:{edge.dst_tool}"
+                f"{edge.src} → {edge.dst}{_tool_suffix(edge.dst_tool)}"
             )
             description = (
                 f"Marker {edge.marker} originated at {edge.src} (external/untrusted) and "
-                f"appeared verbatim in a tool_call to {edge.dst}:{edge.dst_tool} "
+                f"appeared verbatim in a tool_call to {edge.dst}{_tool_suffix(edge.dst_tool)} "
                 f"(privilege={dst_priv}). Data from an untrusted external source shaped the "
                 f"parameters of a destructive operation, and no declared edge governs this "
                 f"authority flow. The approval surface did not expose the marker's origin."
@@ -103,32 +108,32 @@ def compute_findings(declared: DeclaredGraph, observed: ObservedGraph) -> list[F
             severity = "high"
             title = (
                 f"Low-privilege server output shaped high-privilege tool call: "
-                f"{src_server} → {dst_server}:{edge.dst_tool}"
+                f"{src_server} → {dst_server}{_tool_suffix(edge.dst_tool)}"
             )
             description = (
                 f"Marker {edge.marker} propagated from {edge.src} (privilege={src_priv}) "
-                f"to a tool_call on {edge.dst}:{edge.dst_tool} (privilege={dst_priv}). "
+                f"to a tool_call on {edge.dst}{_tool_suffix(edge.dst_tool)} (privilege={dst_priv}). "
                 f"The downstream tool's parameters were shaped by upstream output from a "
                 f"lower-privilege server. No declared edge governs this authority flow, "
                 f"and the approval surface did not expose the marker's provenance."
             )
         elif is_untrusted_ingress:
             severity = "medium"
-            title = f"Untrusted external data reached a server tool call: {edge.src} → {edge.dst}:{edge.dst_tool}"
+            title = f"Untrusted external data reached a server tool call: {edge.src} → {edge.dst}{_tool_suffix(edge.dst_tool)}"
             description = (
                 f"Marker {edge.marker} originated at {edge.src} (external/untrusted) and "
-                f"appeared in a tool_call on {edge.dst}:{edge.dst_tool} "
+                f"appeared in a tool_call on {edge.dst}{_tool_suffix(edge.dst_tool)} "
                 f"(privilege={dst_priv})."
             )
         else:
             severity = "medium"
             title = (
                 f"Undeclared cross-server authority edge: "
-                f"{src_server} → {dst_server}:{edge.dst_tool}"
+                f"{src_server} → {dst_server}{_tool_suffix(edge.dst_tool)}"
             )
             description = (
                 f"Marker {edge.marker} propagated from {edge.src} into a tool_call on "
-                f"{edge.dst}:{edge.dst_tool}. No manifest declares this influence path."
+                f"{edge.dst}{_tool_suffix(edge.dst_tool)}. No manifest declares this influence path."
             )
 
         findings.append(
