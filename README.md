@@ -44,7 +44,7 @@ python -m lab.scenarios.baseline
 python -m lab.scenarios.compositional
 
 # analyze the resulting trace
-python -m urd.analyze \
+python -m urd.cli analyze \
     --manifests lab/manifests/ \
     --trace traces/compositional.jsonl \
     --output traces/compositional.divergence.json
