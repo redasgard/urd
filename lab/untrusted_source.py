@@ -46,8 +46,8 @@ class UntrustedSource:
           - `marker`: a unique token carried alongside the label so Urd can
             mechanically trace provenance byte-for-byte.
 
-        The untrusted source is effectively naming which record to cleanup —
-        something only the operator should be able to do — while the marker
+        The untrusted source is effectively naming which record to cleanup  – 
+        something only the operator should be able to do  –  while the marker
         proves the label's origin.
         """
         marker = new_marker()

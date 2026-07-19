@@ -7,10 +7,12 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
-# runtime artifacts — traces are generated, not committed
+# runtime artifacts  –  traces are generated, not committed
 traces/*.jsonl
 traces/*.divergence.json
 traces/*.dot
+traces/*.seq
+out/
 
 # local databases
 *.db

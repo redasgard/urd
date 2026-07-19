@@ -155,8 +155,27 @@ class Host:
         self.context.add("admin", TOOL_LIST_RECORDS.name, text)
         return text
 
+
+    def _records_for_labels(self, labels: list[str]) -> list[dict[str, Any]]:
+        label_set = set(labels)
+        return [r for r in self.admin.snapshot() if r.get("label") in label_set]
+
+    def _trace_records_snapshot(self, phase: str, labels: list[str], records: list[dict[str, Any]] | None = None, missing: list[dict[str, Any]] | None = None) -> None:
+        payload: dict[str, Any] = {"phase": phase, "labels": labels}
+        if records is not None:
+            payload["records"] = records
+        if missing is not None:
+            payload["missing"] = missing
+        default_writer().emit(
+            source=f"host:{HOST_ID}",
+            kind="records_snapshot",
+            payload=payload,
+        )
+
     def call_admin_delete(self, labels: list[str], derived_from: str) -> str:
         args = {"labels": labels}
+        before_records = self._records_for_labels(labels)
+        self._trace_records_snapshot("before_delete", labels, records=before_records)
         self._trace_param_construction("admin", TOOL_DELETE_RECORDS.name, args, derived_from)
         prompt = self._trace_approval_shown("admin", TOOL_DELETE_RECORDS.name, args)
         approved = self.approval(prompt)
@@ -166,6 +185,10 @@ class Host:
         self._trace_tool_call("admin", TOOL_DELETE_RECORDS.name, args)
         result = self.admin.call_tool(TOOL_DELETE_RECORDS.name, args)
         text = result.content[0].text if result.content else ""
+        after_records = self._records_for_labels(labels)
+        after_labels = {r.get("label") for r in after_records}
+        missing = [r for r in before_records if r.get("label") not in after_labels]
+        self._trace_records_snapshot("after_delete", labels, records=after_records, missing=missing)
         self.context.add("admin", TOOL_DELETE_RECORDS.name, text)
         return text
 

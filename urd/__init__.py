@@ -1,4 +1,4 @@
-"""Urd — compositional trust analysis for MCP deployments."""
+"""Urd  –  compositional trust analysis for MCP deployments."""
 
 __version__ = "0.1.0"
 

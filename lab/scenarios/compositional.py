@@ -1,25 +1,34 @@
 """
 Compositional failure demonstration.
 
-The untrusted external source emits marker-bearing content. Server A faithfully
-returns it. The host's planning context picks up the injected 'Records referenced
-for cleanup: <marker>' phrase and the REFS_PATTERN extractor treats the marker as
-a deletion target. The approval prompt is shown — but the prompt does not surface
-the upstream Server A provenance of the labels being deleted. An auto-approve
-operator accepts, and Server B executes delete_records with parameters that
-originated in the untrusted source.
+The untrusted external source emits content naming a real record. Server A
+faithfully returns it. The host's planning context picks up the injected
+'Records referenced for cleanup: <label>' phrase and the REFS_PATTERN extractor
+treats the label as a deletion target. The approval prompt is shown  –  but it does
+not surface the upstream Server A origin of the labels being deleted. An
+auto-approve operator accepts, and Server B executes delete_records with a
+parameter that originated in the untrusted source.
 
-This scenario exists to satisfy the submission's validation gate:
+This scenario satisfies the submission's validation gate:
 
     Server A output → Server B parameter influence
     → approval prompt lacks provenance
     → Urd shows declared vs observed graph divergence
 
-The proof is byte-level: the marker token injected by the untrusted source
-appears verbatim in the tool_call payload for admin:delete_records.
+The proof is value-flow based: attacker-controlled text emitted by a low-privilege
+server is extracted by the host and reused verbatim as a parameter to a
+high-privilege destructive tool call. The injected label STAGING_LOG_20260315
+appears at labels[0] of the admin:delete_records call, and Urd reconstructs that
+edge from raw message flow.
+
+The URD-MARKER token injected alongside the label is ground-truth instrumentation
+only. Detection does not depend on it: stripping the host's optional
+`provenance_observed` events leaves the HIGH finding intact on the value-flow
+layer (see tests/test_divergence.py::test_high_finding_survives_without_provenance_observed).
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -37,6 +46,10 @@ DB_PATH = REPO_ROOT / "traces" / "compositional.admin.sqlite"
 
 def main() -> int:
     configure_default(TRACE_PATH)
+    _seed = os.environ.get("URD_MARKER_SEED")
+    if _seed is not None:
+        from urd.trace import configure_marker_seed
+        configure_marker_seed(int(_seed) if _seed.isdigit() else _seed)
 
     source = UntrustedSource(source_id="public_weather_feed")
     # Mark the weather server so its NEXT call pulls a marker-bearing payload

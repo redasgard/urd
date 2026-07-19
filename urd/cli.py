@@ -10,8 +10,20 @@ import sys
 from pathlib import Path
 
 from urd.divergence import build_report, to_dot
+from urd.policy import evaluate_report
 from urd.manifests import build_declared_graph, load_manifests_dir
 from urd.runtime import build_observed_graph
+
+
+def _load_graphs(manifests_dir: Path, trace_path: Path):
+    if not manifests_dir.is_dir():
+        raise FileNotFoundError(f"manifests directory not found: {manifests_dir}")
+    if not trace_path.is_file():
+        raise FileNotFoundError(f"trace file not found: {trace_path}")
+    servers, host = load_manifests_dir(manifests_dir)
+    declared = build_declared_graph(servers, host)
+    observed = build_observed_graph(trace_path)
+    return declared, observed
 
 
 def cmd_analyze(args: argparse.Namespace) -> int:
@@ -25,9 +37,11 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         print(f"error: trace file not found: {trace_path}", file=sys.stderr)
         return 2
 
-    servers, host = load_manifests_dir(manifests_dir)
-    declared = build_declared_graph(servers, host)
-    observed = build_observed_graph(trace_path)
+    try:
+        declared, observed = _load_graphs(manifests_dir, trace_path)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     report = build_report(declared, observed)
 
     output_data = report.as_dict()
@@ -59,6 +73,29 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0 if not report.findings else 1
 
 
+def cmd_policy(args: argparse.Namespace) -> int:
+    manifests_dir = Path(args.manifests)
+    trace_path = Path(args.trace)
+    try:
+        declared, observed = _load_graphs(manifests_dir, trace_path)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    report = build_report(declared, observed)
+    policy = evaluate_report(report)
+    output_text = json.dumps(policy, indent=2)
+    if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(output_text, encoding="utf-8")
+        print(f"wrote policy report: {args.output}")
+    else:
+        print(output_text)
+    print(f"policy decision: {policy['final_decision']}", file=sys.stderr)
+    for d in policy.get('decisions', []):
+        print(f"  [{d['decision']}] {d['policy_id']}: {d['reason']}", file=sys.stderr)
+    return 0 if policy["final_decision"] != "BLOCK" else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="urd",
@@ -72,6 +109,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_analyze.add_argument("--output", default=None, help="Write JSON report to this path")
     p_analyze.add_argument("--dot", default=None, help="Optionally write DOT graph to this path")
     p_analyze.set_defaults(func=cmd_analyze)
+
+    p_policy = sub.add_parser("policy", help="Evaluate provenance-bound approval policy for a trace")
+    p_policy.add_argument("--manifests", required=True, help="Directory of *.json manifests")
+    p_policy.add_argument("--trace", required=True, help="JSONL trace file to evaluate")
+    p_policy.add_argument("--output", default=None, help="Write JSON policy decision to this path")
+    p_policy.set_defaults(func=cmd_policy)
 
     return parser
 

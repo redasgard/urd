@@ -6,6 +6,6 @@ digraph urd {
   "weather" [style=filled, fillcolor="#dcfce7", label="weather\n[low]"];
   "ops-assistant" -> "weather" [color=black, label="declared"];
   "ops-assistant" -> "admin" [color=black, label="declared"];
-  "untrusted_source:public_weather_feed" -> "weather" [color=red, penwidth=2.5, style=dashed, label="observed"];
-  "weather" -> "admin" [color=red, penwidth=2.5, style=dashed, label="observed\ndelete_records"];
+  "untrusted_source:public_weather_feed" -> "weather" [color=orange, penwidth=1.2, style=dashed, label="marker"];
+  "weather" -> "admin" [color=purple, penwidth=3.0, style=bold, label="value-flow\ndelete_records"];
 }

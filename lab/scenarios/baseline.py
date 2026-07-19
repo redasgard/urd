@@ -3,11 +3,12 @@ Baseline scenario: benign operation, control case.
 
 The operator kicks off a routine cleanup. Server A returns ordinary weather data
 with no marker. The host falls back to its default policy and deletes one staging
-log. This run must produce NO divergence findings — if it does, something is
+log. This run must produce NO divergence findings  –  if it does, something is
 wrong with Urd, not with the deployment.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -25,6 +26,10 @@ DB_PATH = REPO_ROOT / "traces" / "baseline.admin.sqlite"
 
 def main() -> int:
     configure_default(TRACE_PATH)
+    _seed = os.environ.get("URD_MARKER_SEED")
+    if _seed is not None:
+        from urd.trace import configure_marker_seed
+        configure_marker_seed(int(_seed) if _seed.isdigit() else _seed)
 
     source = UntrustedSource(source_id="public_weather_feed")
     weather = WeatherServer(source=source, inject_marker_on_next_call=False)

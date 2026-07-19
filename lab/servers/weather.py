@@ -2,7 +2,7 @@
 Server A: Weather.
 
 Low-privilege, read-only. Fetches data from an external (untrusted) source and returns
-it to the host. Enforces its own schema and auth — every security control a per-server
+it to the host. Enforces its own schema and auth  –  every security control a per-server
 review would demand is present.
 
 From Server A's perspective, nothing is wrong: the data it returns is valid, it serves
@@ -26,7 +26,7 @@ from urd.trace import default_writer
 SERVER_ID = "weather"
 PRIVILEGE = "low"
 
-# MCP tool declarations — these would be exposed by a real MCP Server
+# MCP tool declarations  –  these would be exposed by a real MCP Server
 TOOL_GET_WEATHER = types.Tool(
     name="get_weather",
     description="Fetch current weather conditions for a named city.",
@@ -45,6 +45,7 @@ class WeatherServer:
     """In-process Server A."""
     source: UntrustedSource
     inject_marker_on_next_call: bool = False
+    target_label: str = "STAGING_LOG_20260315"
 
     @property
     def tools(self) -> list[types.Tool]:
@@ -60,10 +61,10 @@ class WeatherServer:
 
         # Fetch from the untrusted source. In the compositional scenario the test
         # arranges for the source to return marker-bearing content; in the baseline
-        # it returns benign content. Server A does not distinguish — the data is
+        # it returns benign content. Server A does not distinguish  –  the data is
         # valid either way.
         if self.inject_marker_on_next_call:
-            data = self.source.fetch_with_marker(city)
+            data = self.source.fetch_with_marker(city, target_label=self.target_label)
             self.inject_marker_on_next_call = False
         else:
             data = self.source.fetch_benign(city)
