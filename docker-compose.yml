@@ -1,0 +1,7 @@
+services:
+  urd-lab:
+    build: .
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    command: ["./lab.sh", "help"]

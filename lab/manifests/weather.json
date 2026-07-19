@@ -1,0 +1,17 @@
+{
+  "server_id": "weather",
+  "privilege": "low",
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Fetch current weather conditions for a named city.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "city": { "type": "string" }
+        },
+        "required": ["city"]
+      }
+    }
+  ]
+}

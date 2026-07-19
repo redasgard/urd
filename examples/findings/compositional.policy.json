@@ -1,0 +1,22 @@
+{
+  "policy_engine": "urd.provenance_bound_approval",
+  "final_decision": "BLOCK",
+  "decisions": [
+    {
+      "policy_id": "LOW_TRUST_SELECTION_TO_HIGH_TRUST_DELETE",
+      "decision": "BLOCK",
+      "reason": "low-trust source selected protected destructive target for high-trust delete without provenance-aware approval",
+      "finding_id": "URD-0001",
+      "source": "server:weather",
+      "sink": "server:admin",
+      "dst_tool": "delete_records",
+      "target": "STAGING_LOG_20260315",
+      "target_categories": [
+        "incident_evidence"
+      ],
+      "protected_records_removed": 1,
+      "approval_provenance_status": "absent",
+      "evidence_basis": "marker+value_flow"
+    }
+  ]
+}

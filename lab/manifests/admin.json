@@ -1,0 +1,29 @@
+{
+  "server_id": "admin",
+  "privilege": "high",
+  "tools": [
+    {
+      "name": "list_records",
+      "description": "List current records in the operational database.",
+      "params_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "delete_records",
+      "description": "Delete records whose label matches any of the provided identifiers.",
+      "params_schema": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          }
+        },
+        "required": ["labels"]
+      }
+    }
+  ]
+}

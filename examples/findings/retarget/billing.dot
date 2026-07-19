@@ -1,0 +1,12 @@
+digraph urd {
+  rankdir=LR;
+  node [shape=box, fontname="Helvetica"];
+  "ops-assistant" [shape=hexagon, style=filled, fillcolor="#dbeafe"];
+  "admin" [style=filled, fillcolor="#fee2e2", label="admin\n[high]"];
+  "weather" [style=filled, fillcolor="#dcfce7", label="weather\n[low]"];
+  "ops-assistant" -> "weather" [color=black, label="declared"];
+  "ops-assistant" -> "admin" [color=black, label="declared"];
+  "untrusted_source:public_weather_feed" -> "weather" [color=orange, penwidth=1.2, style=dashed, label="marker"];
+  "weather" -> "admin" [color=orange, penwidth=2.5, style=dashed, label="marker\ndelete_records"];
+  "weather" -> "admin" [color=purple, penwidth=3.0, style=bold, label="value-flow\ndelete_records"];
+}
