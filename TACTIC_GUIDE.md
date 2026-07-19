@@ -1,9 +1,9 @@
 # Tactic Guide — Run the Injection Yourself
 
 **Breaking MCP Trust Boundaries: Cross-Server Authority Injection in Agent Toolchains**
-Red Team Village, DEF CON 34 — Tactics Area, Saturday Aug 8, 4:00–5:00 PT
+Red Team Village, DEF CON 34
 
-You don't need to have caught the talk to run this. Everything you need is on this page. If a seat opens up, grab one — otherwise this guide gets you through the whole exercise solo.
+You don't need to have caught the talk to run this. Everything you need is on this page — nobody needs to be standing next to you for it to make sense. If a seat opens up at a staffed table, grab one; otherwise this guide gets you through the whole exercise solo.
 
 ## What you're about to do
 
@@ -13,7 +13,13 @@ On paper, a protected record is safe: the weak tool can't reach the delete, and 
 
 You're going to destroy a protected record anyway — without touching the admin server's permissions, without bypassing the approval, with the approval genuinely being granted. The weak tool can't pull the trigger. It's going to aim one anyway.
 
-## Get armed (~3 minutes)
+## Where are you running this?
+
+**A — RTV tactic table, 4:00–5:00 PT, your own laptop.** Follow "Get armed" below — you'll grab the bundle yourself.
+
+**B — Ludus-hosted range (walked up to a Ludus laptop, chose this tactic from the menu).** The lab is already deployed for you — skip "Get armed" and go straight to "On a Ludus range" right after it. You still get the exact same exercise; you just don't clone anything.
+
+## Get armed — Path A only (~3 minutes)
 
 Get the bundle: **[BUNDLE SOURCE]**. Unzip it, open a terminal in that folder.
 
@@ -37,6 +43,29 @@ Run this first:
 ```bash
 ./lab.sh check
 ```
+
+## On a Ludus range — Path B only
+
+You're already inside a deployed range with this lab on it. Open a terminal — however this range gives you one — and find the repo. It's most likely at `~/urd` or `/opt/urd` or already the current directory when your terminal opens; if you're not sure, run:
+
+```bash
+find / -maxdepth 4 -iname "lab.sh" 2>/dev/null
+cd "$(dirname "$(find / -maxdepth 4 -iname 'lab.sh' 2>/dev/null | head -1)")"
+```
+
+Then confirm you're armed the same way Path A does:
+
+```bash
+./lab.sh check
+```
+
+**If it looks like someone already ran the mission before you** — the protected record is already gone, or `out/` already has findings in it — someone probably used this range before you and it wasn't reset. Reset it yourself, it's cheap:
+
+```bash
+./lab.sh clean
+```
+
+Then continue at "Land the kill" below exactly like Path A. Everything from here down is identical for both paths.
 
 You want to see a Python version and the word `imports, ok`. If that doesn't happen in a minute or two, don't fight it — jump to the static-artifact section below. You lose nothing; you're reading the exact same attack instead of running it.
 
