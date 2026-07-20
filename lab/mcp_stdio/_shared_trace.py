@@ -12,13 +12,52 @@ work unchanged once this is installed via urd.trace.set_default_writer.
 """
 from __future__ import annotations
 
-import fcntl
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from urd.trace import find_markers
+
+# Cross-process locking is POSIX flock or Windows msvcrt; if neither is available
+# we fall back to best-effort unlocked append rather than crash (fcntl is
+# POSIX-only, and importing it unconditionally broke the lab on Windows).
+try:
+    import fcntl as _fcntl
+except ImportError:  # Windows
+    _fcntl = None
+    try:
+        import msvcrt as _msvcrt
+    except ImportError:
+        _msvcrt = None
+
+
+@contextmanager
+def _exclusive_lock(fileobj):
+    if _fcntl is not None:
+        _fcntl.flock(fileobj.fileno(), _fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            _fcntl.flock(fileobj.fileno(), _fcntl.LOCK_UN)
+    elif _msvcrt is not None:
+        fileobj.seek(0)
+        try:
+            _msvcrt.locking(fileobj.fileno(), _msvcrt.LK_LOCK, 1)
+        except OSError:
+            yield  # could not lock; proceed best-effort
+            return
+        try:
+            yield
+        finally:
+            try:
+                fileobj.seek(0)
+                _msvcrt.locking(fileobj.fileno(), _msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+    else:
+        yield  # no cross-process lock available (rare); best-effort append
 
 
 class SharedStdioTraceWriter:
@@ -37,8 +76,7 @@ class SharedStdioTraceWriter:
         # one lock guards both the sequence bump and the append, giving a true
         # global ordering consistent with real causal order across processes.
         with open(self.seq_path, "r+", encoding="utf-8") as sf:
-            fcntl.flock(sf.fileno(), fcntl.LOCK_EX)
-            try:
+            with _exclusive_lock(sf):
                 raw = sf.read().strip()
                 seq = (int(raw) if raw else 0) + 1
                 sf.seek(0)
@@ -56,5 +94,3 @@ class SharedStdioTraceWriter:
                 with open(self.path, "a", encoding="utf-8") as af:
                     af.write(json.dumps(event, separators=(",", ":")) + "\n")
                     af.flush()
-            finally:
-                fcntl.flock(sf.fileno(), fcntl.LOCK_UN)

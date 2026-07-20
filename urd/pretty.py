@@ -41,7 +41,8 @@ _enable_windows_vt()
 def _enabled(stream) -> bool:
     if os.environ.get("NO_COLOR"):
         return False
-    if os.environ.get("FORCE_COLOR"):
+    force = os.environ.get("FORCE_COLOR")
+    if force is not None and force not in ("", "0", "false", "off"):
         return True
     return bool(getattr(stream, "isatty", None) and stream.isatty())
 

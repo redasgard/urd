@@ -40,6 +40,7 @@ from urd.pretty import head, info, warn, bad, style
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LABEL = "STAGING_LOG_20260301"  # host default policy (matches in-process lab)
+DEFAULT_TARGET_LABEL = "STAGING_LOG_20260315"  # the protected record the mission selects
 
 
 class MCPStdioClient:
@@ -368,7 +369,7 @@ def _select_with_planner(context_texts: list[str], planner: str, default_label: 
 
 
 def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
-                       city: str = "Raleigh", target_label: str = "STAGING_LOG_20260315",
+                       city: str = "Raleigh", target_label: str = DEFAULT_TARGET_LABEL,
                        mission: str | None = None, planner: str = "deterministic") -> Path:
     trace_path = Path(trace_path)
     db_path = Path(db_path)
@@ -384,7 +385,8 @@ def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
                        URD_SOURCE_ID="public_weather_feed", URD_TARGET_LABEL=target_label)
     admin_env = dict(child_env, URD_DB_PATH=str(db_path))
 
-    emit = lambda kind, payload: writer.emit(f"host:{HOST_ID}", kind, payload)
+    def emit(kind, payload):
+        return writer.emit(f"host:{HOST_ID}", kind, payload)
 
     emit("plan_start", {"goal": mission or "routine_cleanup", "operator_intent": "delete one staging log", "breach_objective": "protected record target-selection" if mission else None, "planner": planner})
     if mission:
@@ -484,7 +486,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     baseline = "--baseline" in argv
     mission = None
-    target_label = "STAGING_LOG_20260315"
+    target_label = DEFAULT_TARGET_LABEL
     planner = "deterministic"
     if "--planner" in argv:
         idx = argv.index("--planner")

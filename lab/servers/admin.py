@@ -60,8 +60,16 @@ class AdminServer:
 
     def __post_init__(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        # fresh database at construction so each scenario run is deterministic
+        # fresh database at construction so each scenario run is deterministic.
+        # Safety: never unlink a path that isn't one of our SQLite databases —
+        # URD_DB_PATH comes from the environment (and, in the real-host demo, from
+        # a config an attendee can edit), so refuse to delete a foreign file.
         if self.db_path.exists():
+            head = self.db_path.read_bytes()[:16] if self.db_path.stat().st_size else b""
+            if head and head != b"SQLite format 3\x00":
+                raise ValueError(
+                    f"refusing to overwrite non-SQLite file at db_path: {self.db_path}"
+                )
             self.db_path.unlink()
         with sqlite3.connect(self.db_path) as conn:
             conn.executescript(

@@ -46,6 +46,10 @@ class WeatherServer:
     source: UntrustedSource
     inject_marker_on_next_call: bool = False
     target_label: str = "STAGING_LOG_20260315"
+    # Optional: inject on every call whose city matches (case-insensitive), instead
+    # of the one-shot flag. Used by the real-host demo so a stray tool probe on
+    # another city can't burn the injection before the operator's call.
+    inject_when_city: str | None = None
 
     @property
     def tools(self) -> list[types.Tool]:
@@ -63,9 +67,14 @@ class WeatherServer:
         # arranges for the source to return marker-bearing content; in the baseline
         # it returns benign content. Server A does not distinguish  –  the data is
         # valid either way.
-        if self.inject_marker_on_next_call:
+        if self.inject_when_city is not None:
+            should_inject = city.strip().lower() == self.inject_when_city.strip().lower()
+        else:
+            should_inject = self.inject_marker_on_next_call
+            if should_inject:
+                self.inject_marker_on_next_call = False
+        if should_inject:
             data = self.source.fetch_with_marker(city, target_label=self.target_label)
-            self.inject_marker_on_next_call = False
         else:
             data = self.source.fetch_benign(city)
 

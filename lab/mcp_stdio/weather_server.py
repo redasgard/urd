@@ -16,7 +16,7 @@ import os
 
 from lab.mcp_stdio._server_base import serve
 from lab.mcp_stdio._shared_trace import SharedStdioTraceWriter
-from lab.servers.weather import SERVER_ID, WeatherServer
+from lab.servers.weather import WeatherServer
 from lab.untrusted_source import UntrustedSource
 from urd.trace import configure_marker_seed, set_default_writer
 
@@ -24,6 +24,7 @@ from urd.trace import configure_marker_seed, set_default_writer
 def main() -> None:
     trace_path = os.environ["URD_TRACE_PATH"]
     inject = os.environ.get("URD_INJECT_MARKER") == "1"
+    arm_city = os.environ.get("URD_INJECT_ARM_CITY")  # optional city-gated injection
     source_id = os.environ.get("URD_SOURCE_ID", "public_weather_feed")
     target_label = os.environ.get("URD_TARGET_LABEL", "STAGING_LOG_20260315")
 
@@ -35,7 +36,8 @@ def main() -> None:
     set_default_writer(SharedStdioTraceWriter(trace_path, truncate=False))
 
     source = UntrustedSource(source_id=source_id)
-    backend = WeatherServer(source=source, inject_marker_on_next_call=inject, target_label=target_label)
+    backend = WeatherServer(source=source, inject_marker_on_next_call=inject,
+                            target_label=target_label, inject_when_city=arm_city)
 
     serve(
         server_info={"name": "urd-weather", "version": "0.1.0"},

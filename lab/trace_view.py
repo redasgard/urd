@@ -27,6 +27,14 @@ def _trunc(value, n: int = 92) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _dumps(value) -> str:
+    """json.dumps that never crashes the render on a non-serializable payload."""
+    try:
+        return json.dumps(value, default=str)
+    except Exception:  # noqa: BLE001 - the verbose view must survive any payload
+        return str(value)
+
+
 def _summary(event: dict, stream) -> str:
     k = event.get("kind")
     p = event.get("payload") or {}
@@ -40,7 +48,7 @@ def _summary(event: dict, stream) -> str:
         return S("INJECT", "bold", "magenta") + "    " + dim(f"variant={p.get('variant')}  target=", stream=stream) + bad(str(p.get("target_label")), stream=stream)
     if k == "tool_call":
         tool = p.get("tool")
-        call = f"{p.get('server_id')}.{tool}({_trunc(json.dumps(p.get('args') or {}), 56)})"
+        call = f"{p.get('server_id')}.{tool}({_trunc(_dumps(p.get('args') or {}), 56)})"
         if tool == "delete_records":
             return S("KILL", "bold", "red") + "      " + S(call, "bold", "red")
         return dim("call      " + call, stream=stream)
@@ -55,7 +63,7 @@ def _summary(event: dict, stream) -> str:
     if k == "provenance_observed":
         return dim(f"extract   labels={p.get('extracted_labels')}", stream=stream)
     if k == "param_construction":
-        return S("RECOMBINE", "bold", "yellow") + " " + f"{p.get('target_server')}.{p.get('target_tool')} params=" + bad(_trunc(json.dumps(p.get("params") or {}), 40), stream=stream) + dim(f"  derived_from={p.get('derived_from')}", stream=stream)
+        return S("RECOMBINE", "bold", "yellow") + " " + f"{p.get('target_server')}.{p.get('target_tool')} params=" + bad(_trunc(_dumps(p.get("params") or {}), 40), stream=stream) + dim(f"  derived_from={p.get('derived_from')}", stream=stream)
     if k == "records_snapshot":
         phase = p.get("phase")
         if phase == "before_delete":
@@ -66,7 +74,7 @@ def _summary(event: dict, stream) -> str:
             return bad("GONE      MISSING " + ", ".join(m.get("label", "") for m in missing), stream=stream)
         return dim("after     no change", stream=stream)
     if k == "approval_shown":
-        return warn("APPROVAL", stream=stream) + "  " + f"{p.get('server_id')}.{p.get('tool')} " + dim(_trunc(json.dumps(p.get('params') or {}), 34), stream=stream) + "  " + bad("origin not shown", stream=stream)
+        return warn("APPROVAL", stream=stream) + "  " + f"{p.get('server_id')}.{p.get('tool')} " + dim(_trunc(_dumps(p.get("params") or {}), 34), stream=stream) + "  " + bad("origin not shown", stream=stream)
     if k == "approval_response":
         return block("approved", stream=stream) if p.get("approved") else dim("denied", stream=stream)
     if k == "tool_execution":
@@ -74,7 +82,7 @@ def _summary(event: dict, stream) -> str:
         return bad("EXECUTED", stream=stream) + "  deleted=" + bad(str(p.get("deleted_labels")), stream=stream) + f"  protected={p.get('deleted_protected')}  removed={imp.get('protected_records_removed')}"
     if k == "plan_end":
         return dim(f"result={p.get('result')}", stream=stream)
-    return dim(_trunc(json.dumps(p), 70), stream=stream)
+    return dim(_trunc(_dumps(p), 70), stream=stream)
 
 
 def render_trace(path, stream=None) -> None:

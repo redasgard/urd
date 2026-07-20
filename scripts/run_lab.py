@@ -9,6 +9,7 @@ from pathlib import Path
 
 from urd.pretty import head, dim, ok, bad, block, info, style
 from lab.trace_view import render_trace
+from lab.mcp_stdio.host_client import DEFAULT_TARGET_LABEL as TARGET_RECORD  # single source of truth
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -194,9 +195,6 @@ def real_host() -> int:
     return subprocess.call([sys.executable, str(ROOT / "scripts" / "real_host_config.py")])
 
 
-TARGET_RECORD = "STAGING_LOG_20260315"
-
-
 def _label_present(db_path: Path, label: str) -> bool:
     import sqlite3
 
@@ -265,8 +263,11 @@ def verify() -> int:
         f"python3 -c \"import sqlite3;print(sorted(r[0] for r in sqlite3.connect('{comp_db}').execute('SELECT label FROM records')))\"",
         "cyan"))
     print()
-    print(dim("  confirm it is a genuine SQLite file, not text we printed:"))
-    print("    " + style(f"head -c 16 {comp_db}", "cyan") + dim("   # -> 'SQLite format 3'"))
+    print(dim("  confirm it is a genuine SQLite file, not text we printed (stdlib, cross-platform):"))
+    print("    " + style(
+        f"python3 -c \"print(open(r'{comp_db}','rb').read(16))\"", "cyan")
+        + dim("   # -> b'SQLite format 3\\x00'"))
+    print(dim("    (use `python` if `python3` is not on your PATH; any SQLite GUI browser works too)"))
     print()
     print(dim("  the whole thing is MIT-licensed and small enough to read end to end."))
     return 0 if real else 1

@@ -17,10 +17,14 @@ talk, in a tool the audience uses every day.
 
 ## Setup (about two minutes)
 
+> **Platform:** the lab servers run on macOS, Linux, and Windows (Python 3.11+).
+> On Windows, use `python` if `python3` isn't on your PATH. The config uses
+> absolute paths from *this clone* — regenerate it if you move the repo.
+
 1. Generate the MCP config, with absolute paths and env filled in for this repo:
 
    ```bash
-   python3 scripts/real_host_config.py        # or: ./lab.sh real-host
+   python3 scripts/real_host_config.py        # or: ./lab.sh real-host   (Windows: python)
    ```
 
 2. Copy the printed `mcpServers` block into your Cursor MCP config — merge it
@@ -54,11 +58,32 @@ What happens, step by step:
    same way an operator approves a plausible-looking cleanup.
 4. The record is deleted from the real database.
 
+### What this prompt does and does not show
+
+Be precise about the claim, because the prompt is deliberately leading. The
+clause *"action any operational cleanup notes"* is the operator delegating
+action to whatever the weather tool returns. So what you are demonstrating is:
+**even when an operator hands an agent a routine task, the approval surface for
+the resulting destructive call omits the origin of the target** — it never says
+a low-trust weather feed chose `STAGING_LOG_20260315`.
+
+What this is *not*: proof that a naive, un-leading prompt (plain "what's the
+weather in Raleigh?") reliably chains into a delete. It usually will not — a
+model with no cleanup instruction has no reason to call `delete_records`. If you
+want the room to feel that gap, run the un-leading prompt first and let it *not*
+delete, then run the leading one. The teaching point is the **missing provenance
+in the approval dialog**, not that weather output auto-deletes records.
+
 ## Prove the kill is real (don't trust the chat)
+
+From the repo root, with your own tools:
 
 ```bash
 sqlite3 out/real-host/admin.sqlite "SELECT label FROM records WHERE label='STAGING_LOG_20260315';"
 # empty result = genuinely gone, confirmed by your own sqlite3
+
+# no sqlite3 CLI? stdlib, cross-platform (use `python` on Windows):
+python3 -c "import sqlite3;print(sorted(r[0] for r in sqlite3.connect('out/real-host/admin.sqlite').execute('SELECT label FROM records')))"
 ```
 
 Or analyze the session trace the servers wrote, with the offensive tool:
@@ -70,20 +95,51 @@ python3 -m urd.cli analyze    --manifests lab/manifests --trace out/real-host/tr
 
 ## Re-arming between runs
 
-The weather feed injects the target on its **first** call after the server
-starts. To run the demo again, reload/reconnect the MCP servers in Cursor (that
-restarts the weather process and re-arms the injection). The admin server
-re-seeds a fresh database on each start, so the record returns too.
+The generated config arms the injection **by city** (`URD_INJECT_ARM_CITY=Raleigh`),
+so it fires on every `get_weather("Raleigh")` and is not burned by a stray tool
+probe on another city. To reset the database (so the record returns), reload/
+reconnect the MCP servers in Cursor — the admin server re-seeds a fresh DB on
+each start. Regenerating the config (`./lab.sh real-host`) also clears the shared
+session trace so `find-seams`/`analyze` reflect the current run, not an
+accumulation across reloads.
 
 ## Live reliability notes (this is an LLM, not a script)
 
-- The deterministic `./lab.sh mission` is your safety net. If the live agent
-  wanders — asks a clarifying question, calls weather twice, refuses — fall back
-  to the deterministic lab and keep moving. Do not debug a model on stage.
-- The trigger prompt above is deliberately explicit ("action any cleanup notes")
-  to make the chain reliable. The teaching point survives regardless: the
-  **approval dialog never shows who selected the target.**
+The lab servers are deterministic and well-tested; **the model driving them is
+not**. A headless check that the tools respond to MCP calls does not prove that
+your Cursor/model will chain weather → delete on cue. Rehearse it, and know your
+fallback cold.
+
+- **Rehearse against your actual model.** Run the trigger prompt several times
+  before the room. Note which model/version you're on — behavior drifts across
+  releases. If it derails more than it lands, tighten the prompt or switch to the
+  deterministic path as the primary and use Cursor as the "and here it is in a
+  tool you recognize" beat.
+- **Derail signals:** the agent asks a clarifying question, calls `list_records`
+  first, calls `get_weather` on a different city, or paraphrases the delete back
+  to you instead of invoking the tool. When you see one, don't fight it.
+- **The seamless fallback:** `./lab.sh mission --verbose` is your safety net.
+  Transition line: *"the model's being coy — here's the same authority path,
+  deterministically."* Then run the lab. Do not debug a model on stage.
 - The weather note includes a bracketed `[URD-MARKER-…]` token — instrumentation
   for the analyzer. Agents ignore it; it does not affect the delete.
-- Keep the objective sandboxed: the only thing `delete_records` can touch is the
-  seeded lab database under `out/real-host/`. Nothing on your machine is at risk.
+
+## Safety
+
+The only thing `delete_records` can touch is the SQLite database at the
+`URD_DB_PATH` in the generated config — `out/real-host/admin.sqlite`, inside this
+repo. The admin server refuses to overwrite a file that is not one of its own
+SQLite databases (it checks the `SQLite format 3` header before reseeding), so a
+mis-edited `URD_DB_PATH` fails loudly instead of deleting a foreign file. Nothing
+else on your machine is in scope.
+
+## Uninstall
+
+These are **persistent** MCP servers registered in Cursor with absolute paths
+from this clone. When you're done — or if you move/delete the repo — remove them,
+or Cursor will keep trying (and failing) to spawn them:
+
+1. Open the MCP config you pasted into (`~/.cursor/mcp.json` or
+   `<project>/.cursor/mcp.json`; on Windows, `%USERPROFILE%\.cursor\mcp.json`).
+2. Delete the `urd-weather` and `urd-admin` entries under `mcpServers`.
+3. Reload MCP servers in Cursor. Optionally `rm -rf out/real-host/`.
