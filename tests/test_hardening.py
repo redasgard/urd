@@ -306,3 +306,81 @@ def test_launch_uses_list_form_not_shell(gen, tmp_path, monkeypatch) -> None:
     gen.main(["--write", str(tmp_path), "--launch"])
     assert recorded["argv"] == ["/usr/bin/echo", str(tmp_path)]
     assert recorded["shell"] is False
+
+
+# --- docker-mode config: servers run in the urd-lab container, no local Python ---
+
+def test_docker_config_uses_docker_run_not_local_python(gen) -> None:
+    cfg = gen.build_config(docker=True)["mcpServers"]
+    for name in ("urd-weather", "urd-admin"):
+        entry = cfg[name]
+        assert entry["command"] == "docker", f"{name} should spawn docker, not local python"
+        args = entry["args"]
+        assert args[:3] == ["run", "-i", "--rm"]        # interactive stdio, auto-clean
+        assert gen.DOCKER_IMAGE in args                 # references the stable image tag
+        assert args[-3:-1] == ["python", "-m"]          # ...running the server module
+        # no local interpreter path or PYTHONPATH leaks into the docker form
+        assert "env" not in entry
+        assert sys.executable not in args
+
+
+def test_docker_config_forwards_env_into_container(gen) -> None:
+    cfg = gen.build_config(docker=True)["mcpServers"]
+    wargs = cfg["urd-weather"]["args"]
+    # arming + target + the deterministic marker seed travel as -e pairs (set
+    # inside the container, not on the docker CLI). The seed matters: dropping it
+    # would break analyzer reproducibility across runs.
+    assert "URD_INJECT_ARM_CITY=Raleigh" in wargs
+    assert f"URD_TARGET_LABEL={gen._TARGET_LABEL}" in wargs
+    assert "URD_MARKER_SEED=1337" in wargs
+    aargs = cfg["urd-admin"]["args"]
+    # the admin DB path must be the CONTAINER path, not a host path
+    assert f"URD_DB_PATH={gen._CONTAINER_OUT}/admin.sqlite" in aargs
+
+
+def test_docker_config_bind_mounts_repo_for_live_code_and_host_artifacts(gen) -> None:
+    # The whole repo is bind-mounted at /workspace so (a) edits to lab/ are live
+    # without a rebuild and (b) out/real-host writes land on the host, where
+    # verify / your own sqlite3 read the trace + db.
+    cfg = gen.build_config(docker=True)["mcpServers"]
+    mount = f"{gen.ROOT}:/workspace"
+    for name in ("urd-weather", "urd-admin"):
+        args = cfg[name]["args"]
+        i = args.index("-v")
+        assert args[i + 1] == mount
+        # both servers write the trace to the shared container path (same host file
+        # under the repo mount)
+        assert f"URD_TRACE_PATH={gen._CONTAINER_OUT}/trace.jsonl" in args
+        assert gen._CONTAINER_OUT.startswith("/workspace/")  # so it falls inside the mount
+        # a forgotten build fails clean instead of hitting Docker Hub
+        assert "--pull" in args and args[args.index("--pull") + 1] == "never"
+
+
+def test_docker_config_runs_as_host_user_on_posix(gen, monkeypatch) -> None:
+    # root-owned artifacts on a Linux bind mount are a real footgun; on POSIX we
+    # pin the container to the host uid:gid so trace/db stay user-writable.
+    if not hasattr(gen.os, "getuid"):
+        import pytest as _pytest
+        _pytest.skip("no getuid on this platform")
+    monkeypatch.setattr(gen.os, "getuid", lambda: 4242)
+    monkeypatch.setattr(gen.os, "getgid", lambda: 99)
+    args = gen.build_config(docker=True)["mcpServers"]["urd-admin"]["args"]
+    assert "--user" in args and args[args.index("--user") + 1] == "4242:99"
+
+
+def test_docker_flag_threads_through_workspace(gen, tmp_path) -> None:
+    ws = tmp_path / "ws"
+    gen.build_workspace(ws, docker=True)
+    servers = _json.loads((ws / ".cursor" / "mcp.json").read_text())["mcpServers"]
+    # not just command==docker: assert real wiring survived the workspace path, so
+    # a stray build_config() without the flag inside build_workspace is caught
+    for name in ("urd-weather", "urd-admin"):
+        assert servers[name]["command"] == "docker"
+        assert f"URD_TRACE_PATH={gen._CONTAINER_OUT}/trace.jsonl" in servers[name]["args"]
+
+
+def test_local_mode_unchanged_still_uses_python(gen) -> None:
+    # the default (non-docker) path must keep spawning the local interpreter
+    cfg = gen.build_config()["mcpServers"]
+    assert cfg["urd-weather"]["command"] == sys.executable
+    assert "env" in cfg["urd-weather"]

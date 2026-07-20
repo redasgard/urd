@@ -49,6 +49,33 @@ Notes:
 - **Requires a recent Cursor** that reads project-scoped MCP + `AGENTS.md`
   (Cursor ≥ 0.45, 2025+). Older Cursor: use Option B.
 - Reload MCP servers in Cursor after it opens if `urd-*` don't show immediately.
+
+#### No local Python? Run the servers in Docker
+
+Cursor stays on your host (it's a GUI app — don't containerize it); only the two
+MCP servers move into a container, so the demo needs **Docker + Cursor and no
+local Python**.
+
+```bash
+./lab.sh docker-build          # once: builds the urd-lab image (docker build -t urd-lab .)
+./lab.sh cursor --docker       # workspace + launch, servers wired as `docker run`
+```
+
+The generated `.cursor/mcp.json` spawns each server as `docker run -i --rm …
+urd-lab …`. Cursor starts the container **once per session** (not per tool call,
+so no per-call latency) and talks to it over stdio, exactly as with a local
+process. The repo is bind-mounted at `/workspace`, which means two things: your
+edits to `lab/*.py` take effect on the next MCP reload **without rebuilding**,
+and the trace + `admin.sqlite` land on your host under `out/real-host/`, so the
+verification commands below work unchanged. On Linux/macOS the container runs as
+your user, so those files aren't root-owned. This is *not* Cursor-in-a-box —
+it's your real Cursor driving containerized servers. For a fully pre-built,
+zero-setup environment (Cursor included), use the Ludus range instead.
+
+> Build the image once with `./lab.sh docker-build`; you only need to rebuild if
+> you change the Python version or add a dependency — day-to-day edits to the lab
+> code are live through the mount. If you forget to build, the server just fails
+> to start with a clean "image not found" (it won't reach out to Docker Hub).
 - Advanced: `python3 scripts/real_host_config.py --write DIR` just drops the MCP
   config into an existing project (no persona, no isolation) — but the git-ignore
   only protects *this* repo, so add `.cursor/mcp.json` to that repo's `.gitignore`

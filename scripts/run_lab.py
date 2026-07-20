@@ -199,9 +199,26 @@ def cursor() -> int:
     """Prepare an isolated Cursor workspace (AGENTS.md persona + MCP config) and
     launch Cursor on it — the agent sees the tools and its instructions, not the
     lab source. See examples/real-host/README.md.
+
+    Add `--docker` to wire the servers as `docker run` against the urd-lab image
+    (Cursor on your host, servers in a container) — no local Python needed. Build
+    the image first: ./lab.sh docker-build
     """
-    return subprocess.call(
-        [sys.executable, str(ROOT / "scripts" / "real_host_config.py"), "--workspace", "--launch"])
+    cmd = [sys.executable, str(ROOT / "scripts" / "real_host_config.py"), "--workspace", "--launch"]
+    if "--docker" in sys.argv:
+        cmd.append("--docker")
+    return subprocess.call(cmd)
+
+
+def docker_build() -> int:
+    """Build the urd-lab image with a stable tag so `./lab.sh cursor --docker`
+    (and the deterministic `docker run … urd-lab ./lab.sh …` path) can reference
+    it by name. Equivalent to: docker build -t urd-lab ."""
+    if shutil.which("docker") is None:
+        print(bad("docker not found on PATH — install Docker, or use the local path"), file=sys.stderr)
+        return 2
+    print(head("building urd-lab image (docker build -t urd-lab .)"), file=sys.stderr)
+    return subprocess.call(["docker", "build", "-t", "urd-lab", str(ROOT)])
 
 
 def _label_present(db_path: Path, label: str) -> bool:
@@ -443,7 +460,8 @@ Usage:
   ./lab.sh mission
   ./lab.sh verify
   ./lab.sh real-host
-  ./lab.sh cursor
+  ./lab.sh cursor            (add --docker to run the servers in a container)
+  ./lab.sh docker-build
   ./lab.sh target-billing
   ./lab.sh target-customer
   ./lab.sh target-incident
@@ -488,6 +506,7 @@ def main(argv: list[str]) -> int:
         "verify": verify,
         "real-host": real_host,
         "cursor": cursor,
+        "docker-build": docker_build,
         "target-billing": target_billing,
         "target-customer": target_customer,
         "target-incident": target_incident,

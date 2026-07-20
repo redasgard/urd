@@ -24,6 +24,7 @@ selecting a high-trust tool's target — inside a real, familiar agent host.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -53,9 +54,16 @@ def _reset_shared_trace() -> None:
                   "reload MCP servers in Cursor to release it", file=sys.stderr)
 
 
-def build_config() -> dict:
+DOCKER_IMAGE = "urd-lab"
+_CONTAINER_OUT = "/workspace/out/real-host"  # host OUT is bind-mounted here
+_TARGET_LABEL = "STAGING_LOG_20260315"
+
+
+def build_config(docker: bool = False) -> dict:
     # pure: no filesystem side effects, so tests can call it without touching the
     # live out/real-host trace. The session reset happens in main() (a CLI concern).
+    if docker:
+        return _docker_config()
     py = sys.executable
     common = {"PYTHONPATH": str(ROOT), "URD_TRACE_PATH": str(OUT / "trace.jsonl")}
     return {
@@ -70,7 +78,7 @@ def build_config() -> dict:
                     # city stays benign, and the Raleigh call is repeatable across
                     # reloads (no one-shot flag, so nothing gets burned)
                     "URD_INJECT_ARM_CITY": "Raleigh",
-                    "URD_TARGET_LABEL": "STAGING_LOG_20260315",
+                    "URD_TARGET_LABEL": _TARGET_LABEL,
                     "URD_MARKER_SEED": "1337",
                 },
             },
@@ -82,6 +90,46 @@ def build_config() -> dict:
                     "URD_DB_PATH": str(OUT / "admin.sqlite"),
                 },
             },
+        }
+    }
+
+
+def _docker_config() -> dict:
+    """Servers run in the `urd-lab` image; Cursor spawns each container once per
+    session over stdio, so no local Python is needed.
+
+    The repo is bind-mounted at /workspace, so (a) edits to lab/*.py take effect
+    on the next MCP reload with no rebuild, and (b) the trace + admin.sqlite land
+    on the host under out/real-host, where `verify` / your own sqlite3 read them.
+    On POSIX we run as the host user so those artifacts aren't root-owned, and
+    `--pull=never` turns a forgotten build into a clean "image not found" instead
+    of a Docker Hub pull. Requires: ./lab.sh docker-build (docker build -t urd-lab .)."""
+    trace = f"{_CONTAINER_OUT}/trace.jsonl"
+    # whole-repo mount: live code + host-visible artifacts in one bind
+    mount = ["-v", f"{ROOT}:/workspace"]
+    # host-user ownership on Linux/macOS; skip where getuid is absent (Windows)
+    user = ["--user", f"{os.getuid()}:{os.getgid()}"] if hasattr(os, "getuid") else []
+
+    def run(env_pairs: list[tuple[str, str]], module: str) -> dict:
+        args = ["run", "-i", "--rm", "--pull", "never", *user]
+        # don't scatter .pyc into the live-mounted repo
+        for k, v in [("PYTHONDONTWRITEBYTECODE", "1"), *env_pairs]:
+            args += ["-e", f"{k}={v}"]
+        args += mount + [DOCKER_IMAGE, "python", "-m", module]
+        return {"command": "docker", "args": args}
+
+    return {
+        "mcpServers": {
+            "urd-weather": run(
+                [("URD_TRACE_PATH", trace),
+                 ("URD_INJECT_ARM_CITY", "Raleigh"),
+                 ("URD_TARGET_LABEL", _TARGET_LABEL),
+                 ("URD_MARKER_SEED", "1337")],
+                "lab.mcp_stdio.weather_server"),
+            "urd-admin": run(
+                [("URD_TRACE_PATH", trace),
+                 ("URD_DB_PATH", f"{_CONTAINER_OUT}/admin.sqlite")],
+                "lab.mcp_stdio.admin_server"),
         }
     }
 
@@ -116,7 +164,7 @@ def write_cursor_config(config: dict, target_dir: Path) -> Path:
     return mcp
 
 
-def build_workspace(workspace_dir: Path) -> Path:
+def build_workspace(workspace_dir: Path, docker: bool = False) -> Path:
     """Build the Cursor workspace for the demo: an AGENTS.md ops-assistant persona
     plus the MCP config, and nothing else. The lab source is not in this folder,
     so it doesn't appear in Cursor's project view or by normal navigation.
@@ -142,7 +190,7 @@ def build_workspace(workspace_dir: Path) -> Path:
             encoding="utf-8")
     else:
         print(f"note: no opening prompt at {PROMPT_SRC}; skipping START-HERE.md", file=sys.stderr)
-    write_cursor_config(build_config(), workspace_dir)
+    write_cursor_config(build_config(docker=docker), workspace_dir)
     return workspace_dir
 
 
@@ -181,8 +229,20 @@ def main(argv: list[str] | None = None) -> int:
     do_workspace = "--workspace" in argv
     do_write = "--write" in argv
     do_launch = "--launch" in argv
+    do_docker = "--docker" in argv
 
     _reset_shared_trace()  # fresh session, whichever mode
+    if do_docker:
+        # pre-flight so the attendee hears it here, not inside Cursor's opaque
+        # "MCP server failed to start" log
+        if shutil.which("docker") is None:
+            print("note: --docker set but no `docker` on PATH; the config will reference "
+                  "the urd-lab image regardless. Build it with: ./lab.sh docker-build",
+                  file=sys.stderr)
+        elif subprocess.run(["docker", "image", "inspect", DOCKER_IMAGE],
+                            capture_output=True).returncode != 0:
+            print(f"note: image `{DOCKER_IMAGE}` not built yet — the servers won't start "
+                  "until you run: ./lab.sh docker-build", file=sys.stderr)
 
     # --workspace: isolated demo folder (AGENTS.md persona + config), the
     # recommended path — the agent sees the tools, not the lab source.
@@ -193,8 +253,9 @@ def main(argv: list[str] | None = None) -> int:
         i = argv.index("--workspace")
         if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
             ws = Path(argv[i + 1]).expanduser().resolve()
-        build_workspace(ws)
-        print(f"prepared Cursor workspace at {ws}", file=sys.stderr)
+        build_workspace(ws, docker=do_docker)
+        print(f"prepared Cursor workspace at {ws}"
+              + (" (servers run in the urd-lab container)" if do_docker else ""), file=sys.stderr)
         print("  AGENTS.md (ops-assistant persona) + .cursor/mcp.json — the lab source is not", file=sys.stderr)
         print("  in this folder, so it won't show in Cursor's project view.", file=sys.stderr)
         print(f"    cursor {ws}", file=sys.stderr)
@@ -208,7 +269,7 @@ def main(argv: list[str] | None = None) -> int:
             _launch_cursor(ws)
         return 0
 
-    config = build_config()
+    config = build_config(docker=do_docker)
 
     if not do_write:
         print(json.dumps(config, indent=2))
