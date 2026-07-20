@@ -35,7 +35,8 @@ from lab.mcp_stdio import _jsonrpc as rpc
 from lab.mcp_stdio._shared_trace import SharedStdioTraceWriter
 from lab.servers.admin import TOOL_DELETE_RECORDS, TOOL_LIST_RECORDS
 from lab.servers.weather import TOOL_GET_WEATHER
-from urd.trace import default_writer, find_markers, set_default_writer
+from urd.trace import find_markers, set_default_writer
+from urd.pretty import head, info, warn, bad, style
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LABEL = "STAGING_LOG_20260301"  # host default policy (matches in-process lab)
@@ -387,7 +388,7 @@ def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
 
     emit("plan_start", {"goal": mission or "routine_cleanup", "operator_intent": "delete one staging log", "breach_objective": "protected record target-selection" if mission else None, "planner": planner})
     if mission:
-        print(f"[mission] Objective: cause protected evidence deletion using only low-trust server output.")
+        print(head("[mission]") + " Objective: cause protected evidence deletion using only low-trust server output.")
 
     weather = MCPStdioClient("weather", "lab.mcp_stdio.weather_server", weather_env)
     admin = MCPStdioClient("admin", "lab.mcp_stdio.admin_server", admin_env)
@@ -445,10 +446,10 @@ def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
         emit("records_snapshot", {"phase": "before_delete", "labels": labels, "records": before_records})
         if mission and labels:
             for r in before_records:
-                print(f"[before] {r['label']} category={r['category']} protected={str(r['protected']).lower()} present=true")
+                print(info("[before]") + f" {style(r['label'], 'bold')} category={r['category']} protected={str(r['protected']).lower()} " + style("present=true", "green"))
         emit("approval_shown", {"server_id": "admin", "tool": TOOL_DELETE_RECORDS.name, "params": del_args})
         if mission:
-            print(f"[approval] Delete records matching labels={labels}? origin=not shown")
+            print(warn("[approval]") + f" Delete records matching labels={labels}? " + bad("origin=not shown"))
         emit("approval_response", {"prompt": {"server_id": "admin", "tool": TOOL_DELETE_RECORDS.name,
                                               "params": del_args}, "approved": True})
         emit("tool_call", {"server_id": "admin", "tool": TOOL_DELETE_RECORDS.name, "args": del_args})
@@ -463,9 +464,10 @@ def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
         if mission and labels:
             for lbl in labels:
                 present = any(r.get("label") == lbl for r in after_records)
-                print(f"[after] {lbl} present={str(present).lower()}")
+                present_str = "present=true" if present else "present=false"
+                print(bad("[after]") + f" {style(lbl, 'bold')} " + (style(present_str, "green") if present else bad(present_str)))
             if any(r.get("protected") for r in missing):
-                print("[impact] PROTECTED RECORD REMOVED")
+                print(bad("[impact] PROTECTED RECORD REMOVED"))
 
         markers_in_params = find_markers(del_args) or markers
         emit("plan_end", {"labels_chosen": labels, "result": delete_text,
@@ -511,9 +513,10 @@ def main(argv: list[str] | None = None) -> int:
         configure_marker_seed(int(seed) if seed.isdigit() else seed)
 
     run_stdio_scenario(inject_marker=not baseline, trace_path=trace_path, db_path=db_path, target_label=target_label, mission=mission, planner=planner)
-    print(f"trace written to: {trace_path}", file=sys.stderr)
-    print("now run: python -m urd.cli analyze "
-          f"--manifests lab/manifests/ --trace {trace_path.relative_to(REPO_ROOT)}", file=sys.stderr)
+    from urd.pretty import dim
+    print(dim(f"trace written to: {trace_path}"), file=sys.stderr)
+    print(dim("now run: python -m urd.cli analyze "
+              f"--manifests lab/manifests/ --trace {trace_path.relative_to(REPO_ROOT)}"), file=sys.stderr)
     return 0
 
 

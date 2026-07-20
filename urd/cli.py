@@ -18,6 +18,18 @@ from urd.divergence import build_report, to_dot
 from urd.manifests import build_declared_graph, load_manifests_dir
 from urd.runtime import build_observed_graph
 from urd.seams import find_static_seams, confirm_from_trace, build_seam_report
+from urd.pretty import dim, warn, bad, info, style
+
+_E = sys.stderr  # human summaries go to stderr; color-gated on the stderr TTY
+
+
+def _sev(tag: str) -> str:
+    t = tag.upper()
+    if t in ("HIGH", "CRITICAL", "CONFIRMED"):
+        return bad(f"[{t}]", stream=_E)
+    if t in ("MEDIUM",):
+        return warn(f"[{t}]", stream=_E)
+    return info(f"[{t}]", stream=_E)
 
 
 def _load_graphs(manifests_dir: Path, trace_path: Path):
@@ -34,12 +46,12 @@ def _load_graphs(manifests_dir: Path, trace_path: Path):
 def cmd_find_seams(args: argparse.Namespace) -> int:
     manifests_dir = Path(args.manifests)
     if not manifests_dir.is_dir():
-        print(f"error: manifests directory not found: {manifests_dir}", file=sys.stderr)
+        print(bad(f"error: manifests directory not found: {manifests_dir}", stream=_E), file=_E)
         return 2
     try:
         servers, host = load_manifests_dir(manifests_dir)
     except Exception as exc:  # noqa: BLE001 - surface manifest errors to the operator
-        print(f"error: {exc}", file=sys.stderr)
+        print(bad(f"error: {exc}", stream=_E), file=_E)
         return 2
 
     seams = find_static_seams(servers, host)
@@ -47,7 +59,7 @@ def cmd_find_seams(args: argparse.Namespace) -> int:
     if args.trace:
         trace_path = Path(args.trace)
         if not trace_path.is_file():
-            print(f"error: trace file not found: {trace_path}", file=sys.stderr)
+            print(bad(f"error: trace file not found: {trace_path}", stream=_E), file=_E)
             return 2
         observed = build_observed_graph(trace_path)
         seams = confirm_from_trace(seams, servers, observed)
@@ -57,24 +69,24 @@ def cmd_find_seams(args: argparse.Namespace) -> int:
     if args.output:
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output).write_text(output_text, encoding="utf-8")
-        print(f"wrote seam report: {args.output}")
+        print(dim(f"wrote seam report: {args.output}"))
     else:
         print(output_text)
 
     print(
-        f"seams: {report['seam_count']}  "
-        f"critical: {report['critical_count']}  "
-        f"confirmed: {report['confirmed_count']}",
-        file=sys.stderr,
+        dim("seams: ", stream=_E) + str(report['seam_count'])
+        + dim("  critical: ", stream=_E) + bad(str(report['critical_count']), stream=_E)
+        + dim("  confirmed: ", stream=_E) + bad(str(report['confirmed_count']), stream=_E),
+        file=_E,
     )
     for s in report["seams"]:
         tag = "CONFIRMED" if s["confirmed"] else s["rank"].upper()
-        val = f"  value={s['matched_value']}" if s["matched_value"] else ""
+        val = "  value=" + bad(str(s['matched_value']), stream=_E) if s["matched_value"] else ""
         print(
-            f"  [{tag}] {s['source_server']}({s['source_privilege']}) -> "
-            f"{s['sink_server']}:{s['sink_tool']}({s['sink_param_path']}) "
-            f"[{s['privilege_crossing']}]{val}",
-            file=sys.stderr,
+            f"  {_sev(tag)} {style(s['source_server'], 'bold', stream=_E)}({s['source_privilege']}) -> "
+            f"{style(s['sink_server'] + ':' + s['sink_tool'], 'bold', stream=_E)}({s['sink_param_path']}) "
+            f"{dim('[' + s['privilege_crossing'] + ']', stream=_E)}{val}",
+            file=_E,
         )
     # a critical seam is an actionable target; exit 1 so it can gate scripts
     return 1 if report["critical_count"] else 0
@@ -85,16 +97,16 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     trace_path = Path(args.trace)
 
     if not manifests_dir.is_dir():
-        print(f"error: manifests directory not found: {manifests_dir}", file=sys.stderr)
+        print(bad(f"error: manifests directory not found: {manifests_dir}", stream=_E), file=_E)
         return 2
     if not trace_path.is_file():
-        print(f"error: trace file not found: {trace_path}", file=sys.stderr)
+        print(bad(f"error: trace file not found: {trace_path}", stream=_E), file=_E)
         return 2
 
     try:
         declared, observed = _load_graphs(manifests_dir, trace_path)
     except FileNotFoundError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(bad(f"error: {exc}", stream=_E), file=_E)
         return 2
     report = build_report(declared, observed)
 
@@ -104,7 +116,7 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     if args.output:
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         Path(args.output).write_text(output_text, encoding="utf-8")
-        print(f"wrote divergence report: {args.output}")
+        print(dim(f"wrote divergence report: {args.output}"))
     else:
         print(output_text)
 
@@ -112,17 +124,20 @@ def cmd_analyze(args: argparse.Namespace) -> int:
         dot_text = to_dot(declared, observed, report.findings)
         Path(args.dot).parent.mkdir(parents=True, exist_ok=True)
         Path(args.dot).write_text(dot_text, encoding="utf-8")
-        print(f"wrote DOT graph: {args.dot}")
+        print(dim(f"wrote DOT graph: {args.dot}"))
 
     # summary to stderr so it doesn't pollute piped JSON
     print(
-        f"declared edges: {report.declared_edge_count}  "
-        f"observed edges: {report.observed_edge_count}  "
-        f"findings: {len(report.findings)}",
-        file=sys.stderr,
+        dim(
+            f"declared edges: {report.declared_edge_count}  "
+            f"observed edges: {report.observed_edge_count}  "
+            f"findings: {len(report.findings)}",
+            stream=_E,
+        ),
+        file=_E,
     )
     for f in report.findings:
-        print(f"  [{f.severity.upper()}] {f.finding_id}: {f.title}", file=sys.stderr)
+        print(f"  {_sev(f.severity)} {style(f.finding_id, 'bold', stream=_E)}: {f.title}", file=_E)
 
     return 0 if not report.findings else 1
 

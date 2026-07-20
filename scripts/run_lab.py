@@ -7,7 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+from urd.pretty import head, dim, ok, bad, block, info, style
+from lab.trace_view import render_trace
+
 ROOT = Path(__file__).resolve().parents[1]
+
+VERBOSE = False  # set by --verbose/-v; when on, print the full trace after a run
 TRACES = ROOT / "traces"
 OUT = ROOT / "out"
 OUT_TRACES = OUT / "traces"
@@ -31,7 +36,7 @@ def mkdirs() -> None:
 def run(cmd: list[str], *, allow_findings: bool = False) -> int:
     env = dict(os.environ)
     env.setdefault("URD_MARKER_SEED", SEED)
-    print("$ " + " ".join(cmd), flush=True)
+    print(dim("$ " + " ".join(cmd)), flush=True)
     proc = subprocess.run(cmd, cwd=ROOT, env=env)
     if proc.returncode not in (0, 1 if allow_findings else 0):
         return proc.returncode
@@ -46,19 +51,19 @@ def copy_if_exists(src: Path, dst: Path) -> None:
 
 def check() -> int:
     mkdirs()
-    print("Urd DEF CON 34 lab check")
-    print(f"python: {sys.version.split()[0]}")
-    print(f"repo:   {ROOT}")
-    print(f"out:    {OUT}")
+    print(head("Urd DEF CON 34 lab check"))
+    print(dim(f"python: {sys.version.split()[0]}"))
+    print(dim(f"repo:   {ROOT}"))
+    print(dim(f"out:    {OUT}"))
     try:
         import urd  # noqa: F401
         import lab  # noqa: F401
         import mcp  # noqa: F401
     except Exception as exc:
-        print(f"import check failed: {exc}", file=sys.stderr)
+        print(bad(f"import check failed: {exc}"), file=sys.stderr)
         return 2
-    print("imports: ok")
-    print("If Docker or Python execution fails later, open examples/traces/ and examples/findings/.")
+    print("imports: " + ok("ok"))
+    print(dim("If Docker or Python execution fails later, open examples/traces/ and examples/findings/."))
     return 0
 
 
@@ -67,7 +72,9 @@ def baseline() -> int:
     rc = run([sys.executable, "-m", "lab.mcp_stdio.host_client", "--baseline"])
     copy_if_exists(TRACES / "mcp_stdio_baseline.jsonl", OUT_TRACES / "baseline.trace.jsonl")
     copy_if_exists(TRACES / "mcp_stdio_baseline.admin.sqlite", OUT_DB / "baseline.sqlite")
-    print(f"baseline trace: {OUT_TRACES / 'baseline.trace.jsonl'}")
+    print(dim(f"baseline trace: {OUT_TRACES / 'baseline.trace.jsonl'}"))
+    if VERBOSE:
+        render_trace(OUT_TRACES / "baseline.trace.jsonl")
     return rc
 
 
@@ -85,14 +92,16 @@ def compositional(target: str | None = None, mission: bool = False, planner: str
     out_name = "compositional" if planner == "deterministic" else f"planner-{planner}"
     copy_if_exists(TRACES / f"{trace_name}.jsonl", OUT_TRACES / f"{out_name}.trace.jsonl")
     copy_if_exists(TRACES / f"{trace_name}.admin.sqlite", OUT_DB / f"{out_name}.sqlite")
-    print(f"{out_name} trace: {OUT_TRACES / (out_name + '.trace.jsonl')}")
+    print(dim(f"{out_name} trace: {OUT_TRACES / (out_name + '.trace.jsonl')}"))
+    if VERBOSE:
+        render_trace(OUT_TRACES / f"{out_name}.trace.jsonl")
     return rc
 
 
 def analyze_trace(trace: Path, output: Path, dot: Path | None = None) -> int:
     mkdirs()
     if not trace.exists():
-        print(f"trace not found: {trace}", file=sys.stderr)
+        print(bad(f"trace not found: {trace}"), file=sys.stderr)
         return 2
     cmd = [
         sys.executable,
@@ -128,8 +137,8 @@ def ablate() -> int:
     src = OUT_TRACES / "compositional.trace.jsonl"
     dst = OUT_TRACES / "compositional.ablated.trace.jsonl"
     if not src.exists():
-        print(f"missing compositional trace: {src}", file=sys.stderr)
-        print("run ./lab.sh compositional first", file=sys.stderr)
+        print(bad(f"missing compositional trace: {src}"), file=sys.stderr)
+        print(dim("run ./lab.sh compositional first"), file=sys.stderr)
         return 2
     kept = []
     removed = 0
@@ -142,8 +151,8 @@ def ablate() -> int:
             continue
         kept.append(event)
     dst.write_text("".join(json.dumps(e, sort_keys=True) + "\n" for e in kept), encoding="utf-8")
-    print(f"ablated trace: {dst}")
-    print(f"removed provenance_observed events: {removed}")
+    print(dim(f"ablated trace: {dst}"))
+    print(head("ablation:") + f" removed provenance_observed events: {removed}")
     return 0
 
 
@@ -187,7 +196,7 @@ def policy_check() -> int:
     mkdirs()
     trace = OUT_TRACES / "compositional.trace.jsonl"
     if not trace.exists():
-        print("missing compositional trace; running mission first")
+        print(dim("missing compositional trace; running mission first"))
         rc = mission()
         if rc != 0:
             return rc
@@ -213,12 +222,16 @@ def policy_check() -> int:
     ], allow_findings=True)
     if output.exists():
         data = json.loads(output.read_text(encoding="utf-8"))
-        print(f"[policy] final_decision={data.get('final_decision')}")
+        _final = data.get("final_decision")
+        _paint = block if _final == "BLOCK" else ok
+        print(head("[policy]") + " final_decision=" + _paint(str(_final)))
         for d in data.get("decisions", []):
-            print(f"[policy] {d.get('policy_id')} decision={d.get('decision')}")
+            _dec = d.get("decision")
+            _dpaint = block if _dec == "BLOCK" else ok
+            print(head("[policy]") + f" {d.get('policy_id')} decision=" + _dpaint(str(_dec)))
             if d.get("target"):
-                print(f"[target] {d.get('target')} categories={d.get('target_categories')} protected_records_removed={d.get('protected_records_removed')}")
-            print(f"[reason] {d.get('reason')}")
+                print(info("[target]") + f" {style(str(d.get('target')), 'bold')} categories={d.get('target_categories')} protected_records_removed={bad(str(d.get('protected_records_removed')))}")
+            print(dim(f"[reason] {d.get('reason')}"))
     return rc
 
 
@@ -284,11 +297,11 @@ def retarget_demo() -> int:
     for d in (target_dir, finding_dir, db_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    print("Retargetable selection-authority demo")
-    print("Invariant: same admin server, same approval, same host, same permissions.")
-    print("Changed input: low-trust contextual output target label.\n")
+    print(head("Retargetable selection-authority demo"))
+    print(dim("Invariant: same admin server, same approval, same host, same permissions."))
+    print(dim("Changed input: low-trust contextual output target label.\n"))
     for name, label, category in RETARGETS:
-        print(f"[retarget:{name}] selected={label} expected_category={category}")
+        print(head(f"[retarget:{name}]") + f" selected={style(label, 'bold')} expected_category={category}")
         rc = compositional(target=label, mission=True)
         if rc != 0:
             return rc
@@ -299,8 +312,8 @@ def retarget_demo() -> int:
         rc = analyze_trace(trace_copy, finding_dir / f"{name}.findings.json", finding_dir / f"{name}.dot")
         if rc != 0:
             return rc
-        print(f"[retarget:{name}] removed protected {category}; finding written to {finding_dir / (name + '.findings.json')}\n")
-    print("Retarget demo complete: same privileged executor, different protected targets removed.")
+        print(head(f"[retarget:{name}]") + " " + bad(f"removed protected {category}") + dim(f"; finding written to {finding_dir / (name + '.findings.json')}") + "\n")
+    print(ok("Retarget demo complete: ") + "same privileged executor, different protected targets removed.")
     return 0
 
 def all_steps() -> int:
@@ -316,7 +329,7 @@ def clean() -> int:
         if p.exists():
             shutil.rmtree(p)
     mkdirs()
-    print("cleaned generated lab artifacts")
+    print(ok("cleaned generated lab artifacts"))
     return 0
 
 
@@ -343,6 +356,10 @@ Usage:
   ./lab.sh all
   ./lab.sh clean
 
+Add --verbose (or -v) to any run command to print the whole trace, event by
+event — the injection, the aim, the recombination, the approval, the kill:
+  ./lab.sh mission --verbose
+
 Primary path: Docker sandbox.
 Fallback path: local Python.
 Emergency path: examples/traces and examples/findings.
@@ -350,7 +367,12 @@ Emergency path: examples/traces and examples/findings.
 
 
 def main(argv: list[str]) -> int:
-    cmd = argv[1] if len(argv) > 1 else "help"
+    global VERBOSE
+    args = list(argv[1:])
+    if "--verbose" in args or "-v" in args:
+        VERBOSE = True
+        args = [a for a in args if a not in ("--verbose", "-v")]
+    cmd = args[0] if args else "help"
     table = {
         "check": check,
         "find-seams": find_seams,
@@ -376,7 +398,7 @@ def main(argv: list[str]) -> int:
     }
     fn = table.get(cmd)
     if fn is None:
-        print(f"unknown command: {cmd}", file=sys.stderr)
+        print(bad(f"unknown command: {cmd}"), file=sys.stderr)
         help_text()
         return 2
     return fn()
