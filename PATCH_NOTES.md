@@ -1,3 +1,24 @@
+# URD  –  patch changelog
+
+## Offensive rebuild
+
+`urd` is now an offensive toolkit, not a defensive analyzer. Two verbs:
+`find-seams` (recon — enumerate low-trust → high-trust injection seams in a
+target's manifests or a captured session) and `analyze` (proof — reconstruct
+the authority path an injection took).
+
+The `urd cli policy` subcommand noted further down this changelog was **removed**
+from `urd`. The provenance-bound approval control moved to a separate `guard`
+package that imports nothing from `urd` (it reads `urd analyze` output as data),
+so the offensive tool ships with zero defensive surface. The lab's `policy-check`
+now runs `urd analyze` → `guard`.
+
+Destructive-sink detection is unified in `urd/heuristics.py` (word-boundary token
+matching, shared by `find-seams` and `analyze`) so the two never disagree on a
+target.
+
+---
+
 # URD  –  P0 patch changelog
 
 What changed in this pass, mapped to the takeaway's priority list. The fatal
