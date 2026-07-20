@@ -124,11 +124,12 @@ import json as _json  # noqa: E402
 
 @pytest.fixture()
 def gen(tmp_path, monkeypatch):
-    """Import the generator with OUT redirected into tmp, so tests never touch
-    the presenter's live out/real-host/ trace."""
+    """Import the generator with OUT and WORKSPACE_DEFAULT redirected into tmp, so
+    tests never touch the live out/real-host/ trace or the real $HOME workspace."""
     sys.path.insert(0, str(ROOT / "scripts"))
     import real_host_config
     monkeypatch.setattr(real_host_config, "OUT", tmp_path / "out" / "real-host")
+    monkeypatch.setattr(real_host_config, "WORKSPACE_DEFAULT", tmp_path / "ws-default")
     return real_host_config
 
 
@@ -208,6 +209,55 @@ def test_launch_graceful_when_no_cursor_cli(gen, tmp_path, monkeypatch, capsys) 
     rc = gen.main(["--write", str(tmp_path), "--launch"])
     assert rc == 0
     assert "no `cursor` CLI on PATH" in capsys.readouterr().err
+
+
+def test_build_workspace_contains_only_persona_and_config(gen, tmp_path) -> None:
+    ws = tmp_path / "workspace"
+    gen.build_workspace(ws)
+    files = {p.relative_to(ws).as_posix() for p in ws.rglob("*") if p.is_file()}
+    assert files == {"AGENTS.md", ".cursor/mcp.json"}  # only these; no lab source copied in
+    assert "Operations Assistant" in (ws / "AGENTS.md").read_text()
+    servers = _json.loads((ws / ".cursor" / "mcp.json").read_text())["mcpServers"]
+    assert {"urd-weather", "urd-admin"} <= set(servers)
+
+
+def test_workspace_default_is_outside_the_repo() -> None:
+    # The isolation property that actually matters: the default workspace is not
+    # under the repo, so ../.. navigation can't reach the lab source.
+    # NB: deliberately does NOT use the `gen` fixture — that patches
+    # WORKSPACE_DEFAULT, which would make this assert the tmp path and pass even
+    # if the fix were reverted. We read the real, unpatched module constant here.
+    import subprocess
+    out = subprocess.run(
+        [sys.executable, "-c", "import real_host_config as r; print(r.WORKSPACE_DEFAULT.resolve())"],
+        cwd=str(ROOT / "scripts"), capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    default = Path(out)
+    assert ROOT not in default.parents  # not under the repo tree
+    assert default != ROOT
+
+
+def test_build_workspace_fails_loud_on_missing_persona(gen, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(gen, "AGENTS_SRC", tmp_path / "nope" / "AGENTS.md")
+    with pytest.raises(FileNotFoundError):
+        gen.build_workspace(tmp_path / "workspace")
+
+
+def test_workspace_launch_default_creates_persona_and_config(gen, tmp_path, monkeypatch) -> None:
+    # ./lab.sh cursor path: --workspace --launch, graceful without a cursor CLI,
+    # writes to the (patched) default workspace
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    rc = gen.main(["--workspace", "--launch"])
+    assert rc == 0
+    ws = gen.WORKSPACE_DEFAULT
+    assert (ws / "AGENTS.md").exists() and (ws / ".cursor" / "mcp.json").exists()
+
+
+def test_workspace_explicit_dir_is_used(gen, tmp_path) -> None:
+    target = tmp_path / "my-ws"
+    rc = gen.main(["--workspace", str(target)])
+    assert rc == 0
+    assert (target / "AGENTS.md").exists() and (target / ".cursor" / "mcp.json").exists()
 
 
 def test_launch_uses_list_form_not_shell(gen, tmp_path, monkeypatch) -> None:

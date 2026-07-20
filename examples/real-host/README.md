@@ -21,30 +21,38 @@ talk, in a tool the audience uses every day.
 > On Windows, use `python` if `python3` isn't on your PATH. The config uses
 > absolute paths from *this clone* — regenerate it if you move the repo.
 
-### Option A — zero paste (recommended)
-
-Write a project-scoped `.cursor/mcp.json` into the repo and open Cursor on it:
+### Option A — isolated workspace (recommended)
 
 ```bash
 ./lab.sh cursor
-# or: python3 scripts/real_host_config.py --write --launch     (Windows: python)
+# or: python3 scripts/real_host_config.py --workspace --launch     (Windows: python)
 ```
 
-This drops `.cursor/mcp.json` (git-ignored *in this repo* — it holds
-machine-specific absolute paths) and launches Cursor on the folder. Cursor
-auto-loads project-scoped MCP servers from `<project>/.cursor/`, so `urd-weather`
-and `urd-admin` connect on open. If the `cursor` CLI isn't on your PATH, run
-`python3 scripts/real_host_config.py --write` and open Cursor on this folder
-yourself.
+This builds a small workspace at `~/.urd-real-host-workspace` — **outside the
+repo tree** — containing only two things, and opens Cursor on it:
+
+- `AGENTS.md` — an ops-assistant persona that tells the agent it runs the Raleigh
+  site through its tools and actions cleanup notes as routine housekeeping.
+- `.cursor/mcp.json` — the `urd-weather` + `urd-admin` servers (absolute paths
+  back to this clone's lab modules).
+
+Why a separate workspace and not the repo root: opening Cursor on the whole repo
+lets the agent read `lab/servers/weather.py`, notice the injection, and break the
+illusion. From this workspace the lab source isn't in Cursor's project view and
+`../..` lands in your home directory, not the repo — so the agent won't stumble
+on the rig by normal navigation. It is **not a hard sandbox**: an agent that runs
+a terminal could still trace the absolute server paths in `.cursor/mcp.json` back
+to the repo. The persona asks it not to; nothing enforces it. For a clean demo
+that's plenty — real agents don't go spelunking unprompted.
 
 Notes:
-- **Project-scoped MCP requires a recent Cursor** (Cursor ≥ 0.45, 2025+). An
-  older Cursor ignores `<project>/.cursor/mcp.json` — use Option B instead.
-- Any servers already in `.cursor/mcp.json` are preserved; the `urd-weather` /
-  `urd-admin` entries are refreshed from this clone.
-- `--write DIR` can target another folder, but the git-ignore only protects
-  *this* repo — if you write into a different repo, add `.cursor/mcp.json` to
-  its `.gitignore` yourself (the generator warns you).
+- **Requires a recent Cursor** that reads project-scoped MCP + `AGENTS.md`
+  (Cursor ≥ 0.45, 2025+). Older Cursor: use Option B.
+- Reload MCP servers in Cursor after it opens if `urd-*` don't show immediately.
+- Advanced: `python3 scripts/real_host_config.py --write DIR` just drops the MCP
+  config into an existing project (no persona, no isolation) — but the git-ignore
+  only protects *this* repo, so add `.cursor/mcp.json` to that repo's `.gitignore`
+  yourself (the generator warns you).
 
 ### Option B — paste into your global config
 
@@ -97,6 +105,13 @@ model with no cleanup instruction has no reason to call `delete_records`. If you
 want the room to feel that gap, run the un-leading prompt first and let it *not*
 delete, then run the leading one. The teaching point is the **missing provenance
 in the approval dialog**, not that weather output auto-deletes records.
+
+Same caveat for Option A: the `AGENTS.md` persona bakes the "action cleanup
+notes" instruction in **persistently** — it's the same leading instruction as the
+chat prompt above, just standing config rather than a one-off. It's a realistic
+operator setup (assistants do have standing instructions), and the honest claim
+is unchanged: the approval dialog still never shows that a low-trust weather feed
+chose the target.
 
 ## Prove the kill is real (don't trust the chat)
 

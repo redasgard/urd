@@ -196,13 +196,12 @@ def real_host() -> int:
 
 
 def cursor() -> int:
-    """Write .cursor/mcp.json into the repo and launch Cursor on it.
-
-    The zero-paste path: opening Cursor on this folder auto-loads urd-weather
-    and urd-admin. See examples/real-host/README.md.
+    """Prepare an isolated Cursor workspace (AGENTS.md persona + MCP config) and
+    launch Cursor on it — the agent sees the tools and its instructions, not the
+    lab source. See examples/real-host/README.md.
     """
     return subprocess.call(
-        [sys.executable, str(ROOT / "scripts" / "real_host_config.py"), "--write", "--launch"])
+        [sys.executable, str(ROOT / "scripts" / "real_host_config.py"), "--workspace", "--launch"])
 
 
 def _label_present(db_path: Path, label: str) -> bool:

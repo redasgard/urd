@@ -31,6 +31,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "out" / "real-host"
+AGENTS_SRC = ROOT / "examples" / "real-host" / "AGENTS.md"
+# The Cursor workspace lives OUTSIDE the repo tree so the agent can't reach the
+# lab source by normal navigation (../.. lands in $HOME, not the repo).
+WORKSPACE_DEFAULT = Path.home() / ".urd-real-host-workspace"
 
 
 def _reset_shared_trace() -> None:
@@ -111,6 +115,39 @@ def write_cursor_config(config: dict, target_dir: Path) -> Path:
     return mcp
 
 
+def build_workspace(workspace_dir: Path) -> Path:
+    """Build the Cursor workspace for the demo: an AGENTS.md ops-assistant persona
+    plus the MCP config, and nothing else. The lab source is not in this folder,
+    so it doesn't appear in Cursor's project view or by normal navigation.
+
+    Not a hard sandbox: an agent with a terminal could still trace the absolute
+    server paths in .cursor/mcp.json back to the repo. The persona asks it not to.
+    """
+    if not AGENTS_SRC.exists():
+        # AGENTS.md is a shipped repo file; missing means a broken checkout, and a
+        # persona-less workspace would silently gut the demo's reliability on stage.
+        raise FileNotFoundError(f"missing persona template: {AGENTS_SRC} (broken checkout?)")
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    (workspace_dir / "AGENTS.md").write_text(
+        AGENTS_SRC.read_text(encoding="utf-8"), encoding="utf-8")
+    write_cursor_config(build_config(), workspace_dir)
+    return workspace_dir
+
+
+def _launch_cursor(target_dir: Path) -> None:
+    exe = shutil.which("cursor")
+    if not exe:
+        print("no `cursor` CLI on PATH — open Cursor manually on the folder above",
+              file=sys.stderr)
+        return
+    print(f"launching: {exe} {target_dir}", file=sys.stderr)
+    try:
+        subprocess.Popen([exe, str(target_dir)])
+    except OSError as exc:
+        print(f"could not launch Cursor ({exc}); open it manually on the folder above",
+              file=sys.stderr)
+
+
 def _paste_hint() -> str:
     return (
         "\n# ^ paste the block above into your Cursor MCP config, merging with any\n"
@@ -125,10 +162,30 @@ def _paste_hint() -> str:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
+    do_workspace = "--workspace" in argv
     do_write = "--write" in argv
     do_launch = "--launch" in argv
 
     _reset_shared_trace()  # fresh session, whichever mode
+
+    # --workspace: isolated demo folder (AGENTS.md persona + config), the
+    # recommended path — the agent sees the tools, not the lab source.
+    if do_workspace:
+        if do_write:
+            print("note: --write is ignored when --workspace is set", file=sys.stderr)
+        ws = WORKSPACE_DEFAULT
+        i = argv.index("--workspace")
+        if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+            ws = Path(argv[i + 1]).expanduser().resolve()
+        build_workspace(ws)
+        print(f"prepared Cursor workspace at {ws}", file=sys.stderr)
+        print("  AGENTS.md (ops-assistant persona) + .cursor/mcp.json — the lab source is not", file=sys.stderr)
+        print("  in this folder, so it won't show in Cursor's project view.", file=sys.stderr)
+        print(f"    cursor {ws}", file=sys.stderr)
+        if do_launch:
+            _launch_cursor(ws)
+        return 0
+
     config = build_config()
 
     if not do_write:
@@ -136,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
         print(_paste_hint(), file=sys.stderr)
         return 0
 
-    # optional directory argument right after --write
+    # --write: just drop .cursor/mcp.json into a target dir (advanced)
     target_dir = ROOT
     i = argv.index("--write")
     if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
@@ -155,17 +212,7 @@ def main(argv: list[str] | None = None) -> int:
         print("         .gitignore so you don't commit it.", file=sys.stderr)
 
     if do_launch:
-        exe = shutil.which("cursor")
-        if exe:
-            print(f"launching: {exe} {target_dir}", file=sys.stderr)
-            try:
-                subprocess.Popen([exe, str(target_dir)])
-            except OSError as exc:
-                print(f"could not launch Cursor ({exc}); open it manually on the folder above",
-                      file=sys.stderr)
-        else:
-            print("no `cursor` CLI on PATH — open Cursor manually on the folder above",
-                  file=sys.stderr)
+        _launch_cursor(target_dir)
     return 0
 
 
