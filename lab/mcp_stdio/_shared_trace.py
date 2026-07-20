@@ -33,6 +33,21 @@ except ImportError:  # Windows
         _msvcrt = None
 
 
+_warned_unlocked = False
+
+
+def _warn_unlocked() -> None:
+    """Warn once (to stderr, never stdout — stdout is the JSON-RPC stream) that
+    the shared trace is being written without a cross-process lock, so a reader
+    should not rely on globally-monotonic seq under heavy contention."""
+    global _warned_unlocked
+    if not _warned_unlocked:
+        _warned_unlocked = True
+        import sys
+        print("[urd] warning: shared trace running without a cross-process lock; "
+              "sequence ordering is best-effort on this platform", file=sys.stderr)
+
+
 @contextmanager
 def _exclusive_lock(fileobj):
     if _fcntl is not None:
@@ -42,11 +57,15 @@ def _exclusive_lock(fileobj):
         finally:
             _fcntl.flock(fileobj.fileno(), _fcntl.LOCK_UN)
     elif _msvcrt is not None:
+        # msvcrt.locking locks `nbytes` from the CURRENT file position, so this
+        # seek(0) is load-bearing: it scopes the lock to byte 0, the same byte
+        # every process locks. Do not move it without moving the lock.
         fileobj.seek(0)
         try:
             _msvcrt.locking(fileobj.fileno(), _msvcrt.LK_LOCK, 1)
         except OSError:
-            yield  # could not lock; proceed best-effort
+            _warn_unlocked()  # >10s contention or lock unavailable; proceed best-effort
+            yield
             return
         try:
             yield
@@ -57,7 +76,8 @@ def _exclusive_lock(fileobj):
             except OSError:
                 pass
     else:
-        yield  # no cross-process lock available (rare); best-effort append
+        _warn_unlocked()  # no cross-process lock primitive (rare); best-effort append
+        yield
 
 
 class SharedStdioTraceWriter:

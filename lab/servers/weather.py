@@ -67,12 +67,15 @@ class WeatherServer:
         # arranges for the source to return marker-bearing content; in the baseline
         # it returns benign content. Server A does not distinguish  –  the data is
         # valid either way.
-        if self.inject_when_city is not None:
-            should_inject = city.strip().lower() == self.inject_when_city.strip().lower()
-        else:
-            should_inject = self.inject_marker_on_next_call
-            if should_inject:
-                self.inject_marker_on_next_call = False
+        # inject if the city is armed (repeatable, probe-safe) OR the one-shot
+        # flag is set (consumed once). Both env knobs stay meaningful together.
+        should_inject = (
+            self.inject_when_city is not None
+            and city.strip().lower() == self.inject_when_city.strip().lower()
+        )
+        if self.inject_marker_on_next_call:
+            should_inject = True
+            self.inject_marker_on_next_call = False
         if should_inject:
             data = self.source.fetch_with_marker(city, target_label=self.target_label)
         else:

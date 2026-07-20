@@ -250,6 +250,7 @@ def verify() -> int:
 
     # --- don't trust us: reproduce with tools we did not write --------------- #
     have_sqlite3 = shutil.which("sqlite3") is not None
+    py = os.path.basename(sys.executable) or "python3"  # the interpreter you actually have
     print()
     print(head("── don't trust this command either — check it yourself ──"))
     print(dim("  the databases are standard SQLite files. open them with your own tools:"))
@@ -260,14 +261,14 @@ def verify() -> int:
     else:
         print(dim("    (no system sqlite3 found — use the stdlib one-liner below)"))
     print("    " + style(
-        f"python3 -c \"import sqlite3;print(sorted(r[0] for r in sqlite3.connect('{comp_db}').execute('SELECT label FROM records')))\"",
+        f"{py} -c \"import sqlite3;print(sorted(r[0] for r in sqlite3.connect('{comp_db}').execute('SELECT label FROM records')))\"",
         "cyan"))
     print()
     print(dim("  confirm it is a genuine SQLite file, not text we printed (stdlib, cross-platform):"))
     print("    " + style(
-        f"python3 -c \"print(open(r'{comp_db}','rb').read(16))\"", "cyan")
+        f"{py} -c \"print(open(r'{comp_db}','rb').read(16))\"", "cyan")
         + dim("   # -> b'SQLite format 3\\x00'"))
-    print(dim("    (use `python` if `python3` is not on your PATH; any SQLite GUI browser works too)"))
+    print(dim("    (any SQLite GUI browser works too)"))
     print()
     print(dim("  the whole thing is MIT-licensed and small enough to read end to end."))
     return 0 if real else 1
