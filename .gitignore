@@ -27,3 +27,5 @@ out/
 # OS
 .DS_Store
 docs/workshop/
+OPERATOR_RUNBOOK.md
+WORKSHOP_QUICKSTART.md
