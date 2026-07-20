@@ -32,9 +32,7 @@ Dockerfile                   Docker sandbox
 docker-compose.yml           Compose entrypoint
 examples/traces/             Static trace rescue artifacts
 examples/findings/           Static finding rescue artifacts
-docs/workshop/                Final script, verbatim narration (stage + tactic table), lab config, and rescue plan
-TACTIC_GUIDE.md               Attendee-facing self-serve guide for the 4:00-5:00 PT tactic table
-OPERATOR_RUNBOOK.md           P9 stage control commands, first-25-minute cut, policy-check, live retarget order, and hostile Q&A answers
+TACTIC_GUIDE.md               Attendee-facing self-serve guide for the tactic table
 examples/external-host/       External-host trace adapter credibility artifact
 examples/external-host-witness/ Optional slot for a real authorized third-party host capture; intentionally not faked
 ```
@@ -350,20 +348,9 @@ out/db/baseline.sqlite
 out/db/compositional.sqlite
 ```
 
-## Workshop docs
+## Tactic
 
-Confirmed run of show: **3:00-4:00 PT workshop stage, 4:00-5:00 PT tactic table, zero transition time** (per RTV organizer, 2026-07-15).
-
-```text
-docs/workshop/01_final_script.md          Original prose stage script
-docs/workshop/01_narration.md             Verbatim stage narration, 3:00-4:00 PT, standalone 60 min
-docs/workshop/02_tactic_narration.md      Verbatim tactic-table narration, 4:00-5:00 PT, rolling loop (not linear)
-docs/workshop/02_lab_config.md            Lab distribution and execution configuration
-docs/workshop/03_emergency_rescue_plan_abc.md   Live-room rescue plan A, B, and C
-TACTIC_GUIDE.md                           Attendee-facing self-serve guide for the tactic table
-```
-
-DOCX versions are included for speaker and organizer use.
+Run of show: **3:00-4:00 PT workshop stage, 4:00-5:00 PT tactic table, zero transition time.** If you're reproducing the exercise on your own — at the tactic table, on a Ludus-hosted range, or solo — start with `TACTIC_GUIDE.md`.
 
 ## License
 
