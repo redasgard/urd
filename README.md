@@ -354,7 +354,7 @@ Run of show: **3:00-4:00 PT workshop stage, 4:00-5:00 PT tactic table, zero tran
 
 ## License
 
-Apache 2.0.
+MIT.
 
 ## Author
 
