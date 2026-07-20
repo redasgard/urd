@@ -184,6 +184,16 @@ def mission() -> int:
     return compositional(mission=True)
 
 
+def real_host() -> int:
+    """Print a Cursor MCP config that runs the primitive in a real host.
+
+    Emits clean JSON on stdout (no `$` echo) so it can be piped or pasted
+    straight into Cursor's config; the how-to hint goes to stderr. See
+    examples/real-host/README.md for the live demo playbook.
+    """
+    return subprocess.call([sys.executable, str(ROOT / "scripts" / "real_host_config.py")])
+
+
 TARGET_RECORD = "STAGING_LOG_20260315"
 
 
@@ -421,6 +431,7 @@ Usage:
   ./lab.sh compositional
   ./lab.sh mission
   ./lab.sh verify
+  ./lab.sh real-host
   ./lab.sh target-billing
   ./lab.sh target-customer
   ./lab.sh target-incident
@@ -463,6 +474,7 @@ def main(argv: list[str]) -> int:
         "compositional": compositional,
         "mission": mission,
         "verify": verify,
+        "real-host": real_host,
         "target-billing": target_billing,
         "target-customer": target_customer,
         "target-incident": target_incident,

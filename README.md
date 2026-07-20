@@ -40,6 +40,7 @@ docker-compose.yml           Compose entrypoint
 examples/traces/             Static trace rescue artifacts
 examples/findings/           Static finding rescue artifacts
 TACTIC_GUIDE.md               Attendee-facing self-serve guide for the tactic table
+examples/real-host/           Run the primitive live in Cursor (a real host); config generator + playbook
 examples/external-host/       External-host trace adapter credibility artifact
 examples/external-host-witness/ Optional slot for a real authorized third-party host capture; intentionally not faked
 ```
