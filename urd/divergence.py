@@ -25,14 +25,15 @@ from typing import Any, Literal
 
 from urd.manifests import DeclaredGraph
 from urd.runtime import ObservedGraph, ObservedEdge, ValueFlowEdge
+from urd.heuristics import is_destructive as _is_destructive
 
 
 Severity = Literal["info", "low", "medium", "high"]
 Basis = Literal["value_flow", "marker", "marker+value_flow"]
 
-# tool-name heuristic for destructive sinks (enriches the finding; severity is
-# driven by the privilege crossing, not this set)
-_DESTRUCTIVE_HINTS = ("delete", "drop", "remove", "purge", "truncate", "write", "exec")
+# destructive-sink heuristic is shared with find-seams (urd.heuristics) so the
+# two tools never give contradictory verdicts on the same target. It enriches
+# the finding; severity is driven by the privilege crossing, not this set.
 
 
 @dataclass
@@ -76,10 +77,6 @@ def _privilege_rank(priv: str | None) -> int:
 
 def _tool_suffix(dst_tool: str | None) -> str:
     return f":{dst_tool}" if dst_tool else ""
-
-
-def _is_destructive(tool: str | None) -> bool:
-    return bool(tool) and any(h in tool.lower() for h in _DESTRUCTIVE_HINTS)
 
 
 def _approval_status(observed: ObservedGraph, server: str | None, tool: str | None) -> str:

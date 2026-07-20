@@ -21,52 +21,88 @@ pulls the trigger for you.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, asdict
 from typing import Any
 
 from urd.manifests import ServerManifest, HostConfig
 from urd.runtime import ObservedGraph
-
-# Tool-name heuristic for destructive sinks. A value flowing into one of these
-# from a low-trust source is the high-value seam.
-_DESTRUCTIVE_HINTS = ("delete", "drop", "remove", "purge", "truncate", "write",
-                      "exec", "run", "send", "transfer", "revoke", "grant", "kill")
+from urd.heuristics import is_destructive as _is_destructive
 
 _PRIV_RANK = {"low": 1, "medium": 2, "high": 3}
+_INDEX = re.compile(r"\[\d+\]")
 
 
 def _rank(priv: str | None) -> int:
     return _PRIV_RANK.get(priv or "", 0)
 
 
-def _is_destructive(tool_name: str) -> bool:
-    return any(h in tool_name.lower() for h in _DESTRUCTIVE_HINTS)
+def _canonical_path(path: str) -> str:
+    """Collapse concrete array indices to `[*]` so a static seam (`labels[*]`)
+    matches a witnessed value that landed at a specific index (`labels[3]`)."""
+    return _INDEX.sub("[*]", path)
+
+
+def _type_set(schema: dict) -> set[str]:
+    """JSON Schema `type` as a set, tolerating a list (nullable) or omission.
+
+    A schema with `properties` but no `type` is an implicit object; one with
+    `items` but no `type` is an implicit array. Real manifests do both."""
+    t = schema.get("type")
+    types: set[str] = set()
+    if isinstance(t, str):
+        types.add(t)
+    elif isinstance(t, list):
+        types.update(x for x in t if isinstance(x, str))
+    if not types:
+        if "properties" in schema or "additionalProperties" in schema:
+            types.add("object")
+        elif "items" in schema:
+            types.add("array")
+    return types
 
 
 def injectable_param_paths(schema: dict, prefix: str = "") -> list[str]:
-    """Return the paths of every attacker-controllable leaf in a tool's schema.
+    """Return the paths of every attacker-controllable string leaf in a schema.
 
-    A leaf is injectable if a string can land in it: a string field, or the
-    first element of a string array. These are the places a value carried from
-    a low-trust source can become part of a privileged call.
+    A leaf is injectable if a string can land in it: a string field, or an
+    element of a string array (reported as `name[*]` — static analysis can't
+    know which index a value will take). Tolerates nullable `type` lists,
+    implicit objects/arrays, and `oneOf`/`anyOf`/`allOf` unions. Deduplicates
+    so a union of string branches yields one path, not many.
     """
     if not isinstance(schema, dict):
         return []
-    t = schema.get("type")
-    if t == "object":
-        paths: list[str] = []
+
+    out: list[str] = []
+
+    for combiner in ("oneOf", "anyOf", "allOf"):
+        for sub in schema.get(combiner) or []:
+            out.extend(injectable_param_paths(sub, prefix))
+
+    types = _type_set(schema)
+    if "object" in types:
         for name, sub in (schema.get("properties") or {}).items():
             child = f"{prefix}.{name}" if prefix else name
-            paths.extend(injectable_param_paths(sub, child))
-        return paths
-    if t == "array":
-        items = schema.get("items") or {}
-        if items.get("type") == "string":
-            return [f"{prefix}[0]"]
-        return injectable_param_paths(items, f"{prefix}[0]")
-    if t == "string":
-        return [prefix or "<value>"]
-    return []
+            out.extend(injectable_param_paths(sub, child))
+    if "array" in types:
+        items = schema.get("items")
+        if isinstance(items, list):  # tuple validation
+            for i, sub in enumerate(items):
+                out.extend(injectable_param_paths(sub, f"{prefix}[{i}]"))
+        else:
+            out.extend(injectable_param_paths(items or {}, f"{prefix}[*]"))
+    if "string" in types:
+        out.append(prefix or "<value>")
+
+    # dedupe, preserve first-seen order
+    seen: set[str] = set()
+    result: list[str] = []
+    for p in out:
+        if p not in seen:
+            seen.add(p)
+            result.append(p)
+    return result
 
 
 @dataclass
@@ -165,9 +201,17 @@ def _server_of(component: str) -> str | None:
 def confirm_from_trace(seams: list[Seam], servers: list[ServerManifest],
                        observed: ObservedGraph) -> list[Seam]:
     """Overlay a captured session: mark seams that actually fired, and append
-    any confirmed low->high value flow the static pass didn't predict."""
+    any confirmed low->high value flow the static pass didn't predict.
+
+    Matching keys on (source, sink, tool, canonical-param) so distinct low-trust
+    sources reaching the same sink stay distinct, and a value witnessed at a
+    concrete array index (`labels[3]`) still matches its static seam
+    (`labels[*]`)."""
     priv = {s.server_id: s.privilege for s in servers}
-    static_key = {(s.sink_server, s.sink_tool, s.sink_param_path): s for s in seams}
+    static_key = {
+        (s.source_server, s.sink_server, s.sink_tool, _canonical_path(s.sink_param_path)): s
+        for s in seams
+    }
 
     for edge in observed.value_edges:
         src_srv = _server_of(edge.src)
@@ -176,11 +220,12 @@ def confirm_from_trace(seams: list[Seam], servers: list[ServerManifest],
             continue
         if _rank(priv.get(src_srv)) >= _rank(priv.get(dst_srv)):
             continue  # not a privilege crossing
-        key = (dst_srv, edge.dst_tool or "", edge.sink_path or "")
+        key = (src_srv, dst_srv, edge.dst_tool or "", _canonical_path(edge.sink_path or ""))
         hit = static_key.get(key)
         if hit is not None:
             hit.confirmed = True
             hit.matched_value = edge.matched_value
+            hit.sink_param_path = edge.sink_path or hit.sink_param_path  # precise index witnessed
         else:
             destructive = _is_destructive(edge.dst_tool or "")
             seams.append(Seam(

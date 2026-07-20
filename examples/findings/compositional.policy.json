@@ -1,5 +1,5 @@
 {
-  "policy_engine": "urd.provenance_bound_approval",
+  "policy_engine": "guard.provenance_bound_approval",
   "final_decision": "BLOCK",
   "decisions": [
     {

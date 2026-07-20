@@ -3,10 +3,17 @@
 The defensive companion to [Urd](../README.md), kept deliberately separate.
 
 Urd is offensive: it finds where a low-trust MCP server can reach a high-trust
-tool, and proves an injection landed. `guard` is the one control that stops it —
-a provenance-bound approval gate that blocks a privileged operation when the
-target was selected by a low-trust source and the approval surface omitted that
-origin.
+tool, and proves an injection landed. `guard` is the control the operator hits
+when a target has it deployed — a provenance-bound approval decision that returns
+`BLOCK` when the target of a destructive operation was selected by a low-trust
+source and the approval surface omitted that origin.
+
+`guard` decides on Urd's *proven* path: it reads a finding and returns the
+verdict. In a real deployment you wire that verdict into the approval loop so it
+gates before execution; run against a captured trace (as the workshop does) it is
+an after-the-fact audit that reaches the same decision. It currently gates the
+`delete_records` destructive sink the workshop demonstrates; the same shape
+extends to other destructive sinks.
 
 It is not part of the Urd toolkit and imports nothing from it. It reads Urd's
 analysis output as data — the JSON that `urd analyze --output` writes — so it can
