@@ -135,7 +135,9 @@ def build_workspace(workspace_dir: Path) -> Path:
     # rig — the agent could read it), so it's one paste away in the Cursor window.
     if PROMPT_SRC.exists():
         (workspace_dir / "START-HERE.md").write_text(
-            "Paste this into Cursor's agent chat to start:\n\n"
+            "First, switch the tools on: in Cursor open Settings -> MCP and enable\n"
+            "`urd-weather` and `urd-admin` (Cursor adds project servers switched off).\n"
+            "When they show their tools, paste this into the agent chat:\n\n"
             + PROMPT_SRC.read_text(encoding="utf-8").strip() + "\n",
             encoding="utf-8")
     else:
@@ -196,10 +198,11 @@ def main(argv: list[str] | None = None) -> int:
         print("  AGENTS.md (ops-assistant persona) + .cursor/mcp.json — the lab source is not", file=sys.stderr)
         print("  in this folder, so it won't show in Cursor's project view.", file=sys.stderr)
         print(f"    cursor {ws}", file=sys.stderr)
+        print("\n  first time on this machine: in Cursor, Settings -> MCP, enable urd-weather", file=sys.stderr)
+        print("  and urd-admin (Cursor ships project servers disabled); it remembers after that.", file=sys.stderr)
         prompt = _prompt_text()
         if prompt:
-            print("\n  once Cursor is open, paste this into the agent chat (also in START-HERE.md):",
-                  file=sys.stderr)
+            print("\n  then paste this into the agent chat (also in START-HERE.md):", file=sys.stderr)
             print(f"    {prompt}", file=sys.stderr)
         if do_launch:
             _launch_cursor(ws)

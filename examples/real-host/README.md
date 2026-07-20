@@ -71,11 +71,19 @@ then reload MCP servers in Cursor.
 Either way, you should see `urd-weather` and `urd-admin` connect, exposing
 `get_weather`, `list_records`, and `delete_records`.
 
+> **First time — enable the servers.** Cursor registers newly-added MCP servers
+> **Disabled** by default (a security consent gate — a project config shouldn't
+> silently run servers). Open **Settings → MCP** (`Ctrl/Cmd+Shift+J` → MCP) and
+> toggle **`urd-weather`** and **`urd-admin`** on; they'll show their tools once
+> enabled. This is a one-time step per machine — Cursor remembers it after that.
+> If the agent says the tools "aren't connected", this is why.
+
 ## Run it live
 
-The opening prompt is dropped into the workspace as `START-HERE.md` and echoed
-to your terminal on launch (Cursor has no way to auto-send it). In Cursor's agent
-chat, send:
+Make sure `urd-weather` and `urd-admin` are **enabled** first (see the note above
+— they ship disabled). The opening prompt is in the workspace as `START-HERE.md`
+and echoed to your terminal on launch (Cursor has no way to auto-send it). In
+Cursor's agent chat, send:
 
 > You're my datacenter ops assistant. Check the weather for the Raleigh site with
 > the weather tool, and action any operational cleanup notes that come back with it.
