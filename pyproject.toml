@@ -5,14 +5,14 @@ build-backend = "hatchling.build"
 [project]
 name = "urd"
 version = "0.1.0"
-description = "Compositional trust analysis for Model Context Protocol deployments"
+description = "Cross-server authority injection for MCP agent stacks — find the seam, land the injection, prove the kill."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
     { name = "Red Asgard" },
 ]
-keywords = ["mcp", "security", "agent", "trust-graph", "compositional-analysis"]
+keywords = ["mcp", "security", "agent", "authority-injection", "cross-server", "offensive-security", "red-team"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Information Technology",

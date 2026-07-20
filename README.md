@@ -1,17 +1,22 @@
-# Urd DEF CON 34 RTV Workshop Repo
+# Urd — Cross-Server Authority Injection for MCP Agent Stacks
 
-**Breaking MCP Trust Boundaries: Cross-Server Authority Injection in Agent Toolchains**
+**Breaking MCP Trust Boundaries — DEF CON 34, Red Team Village**
 
-Urd is a research harness for compositional trust analysis in MCP deployments. This workshop repo demonstrates one concrete failure class: low-trust MCP output crossing through host planning context, selecting a protected record, and reappearing as a high-trust destructive tool parameter.
+Urd is offensive tooling for one attack primitive: a low-privilege MCP server chooses the target a high-privilege server destroys, and the approval only ever sees the trigger. You never touch the dangerous tool — you feed a name to the harmless one, and the host pulls the trigger for you.
 
-The short version:
+```text
+urd find-seams   recon:  where can a low-trust source reach a high-trust sink?
+urd analyze      proof:  did the injection land, and where's the receipt?
+```
+
+The short version of the primitive:
 
 ```text
 low-trust weather tool_result
 → host planning context
 → high-trust admin.delete_records(labels[0])
-→ approval shows final action but not upstream provenance
-→ Urd reconstructs the authority path from the trace
+→ approval shows final action but not who selected the target
+→ Urd reconstructs the authority path — your receipt that it landed
 ```
 
 The low-privilege server does not perform the delete. It selects what gets deleted. In the default mission, the selected target is a protected incident-evidence record in the controlled SQLite sandbox. That is practical authority. P9 keeps the live room path sharp: show protected state loss first, retarget second, ablation third, then show provenance-bound approval as the non-SOC control. Planner-demo and local Gemma planner stay optional/Q&A unless ahead of schedule.
@@ -21,8 +26,10 @@ This is not a "they did not log enough" lab. The trace is evidence, not the fix.
 ## What this repo contains
 
 ```text
-urd/                         Analyzer implementation
-lab/                         MCP lab package and stdio harness
+urd/                         Offensive toolkit: find-seams (recon) + analyze (proof)
+guard/                       Defensive companion, shipped separately: provenance-bound
+                             approval. Reads urd's output as data; imports nothing from urd.
+lab/                         MCP lab package and stdio harness (the reproducible target)
 mcp/                         Tiny local MCP type shim for offline workshop execution
 scripts/run_lab.py           Cross-platform lab command dispatcher
 lab.sh                       macOS/Linux wrapper

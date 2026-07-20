@@ -155,17 +155,34 @@ def analyze_ablated() -> int:
     )
 
 
+def find_seams() -> int:
+    """Recon: enumerate the injection seams in the lab's declared manifests.
+
+    Static pass shows where a low-trust source can reach a high-trust sink; if a
+    mission trace exists, confirm which seam actually fired and with what value.
+    """
+    mkdirs()
+    out = OUT_FINDINGS / "seams.json"
+    cmd = [sys.executable, "-m", "urd.cli", "find-seams",
+           "--manifests", str(MANIFESTS), "--output", str(out)]
+    trace = OUT_TRACES / "compositional.trace.jsonl"
+    if trace.exists():
+        cmd += ["--trace", str(trace)]
+    return run(cmd, allow_findings=True)
+
+
 def mission() -> int:
     return compositional(mission=True)
 
 
 
 def policy_check() -> int:
-    """Evaluate provenance-bound approval policy against the current compositional trace.
+    """Demonstrate the one wall: provenance-bound approval blocking the breach.
 
-    This is the non-SOC control: not "log harder", but block/require high-risk
-    approval when a low-trust selector supplies a protected target to a
-    high-trust destructive operation.
+    `guard` is the defensive companion, shipped separately from the urd offensive
+    toolkit. The flow is honest about the split: urd proves the authority path,
+    then guard reads that proof and decides whether it may proceed before a
+    low-trust selector's protected target reaches a high-trust destructive delete.
     """
     mkdirs()
     trace = OUT_TRACES / "compositional.trace.jsonl"
@@ -175,20 +192,25 @@ def policy_check() -> int:
         if rc != 0:
             return rc
     trace = OUT_TRACES / "compositional.trace.jsonl"
+    findings = OUT_FINDINGS / "compositional.findings.json"
+
+    # urd (offense) proves the authority path...
+    rc = run([
+        sys.executable, "-m", "urd.cli", "analyze",
+        "--manifests", str(MANIFESTS),
+        "--trace", str(trace),
+        "--output", str(findings),
+    ], allow_findings=True)
+    if not findings.exists():
+        return rc
+
+    # ...guard (defense, separate) reads that proof and decides.
     output = OUT_FINDINGS / "compositional.policy.json"
-    cmd = [
-        sys.executable,
-        "-m",
-        "urd.cli",
-        "policy",
-        "--manifests",
-        str(MANIFESTS),
-        "--trace",
-        str(trace),
-        "--output",
-        str(output),
-    ]
-    rc = run(cmd, allow_findings=True)
+    rc = run([
+        sys.executable, "-m", "guard.cli",
+        "--findings", str(findings),
+        "--output", str(output),
+    ], allow_findings=True)
     if output.exists():
         data = json.loads(output.read_text(encoding="utf-8"))
         print(f"[policy] final_decision={data.get('final_decision')}")
@@ -303,6 +325,7 @@ def help_text() -> None:
 
 Usage:
   ./lab.sh check
+  ./lab.sh find-seams
   ./lab.sh baseline
   ./lab.sh compositional
   ./lab.sh mission
@@ -330,6 +353,7 @@ def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "help"
     table = {
         "check": check,
+        "find-seams": find_seams,
         "baseline": baseline,
         "compositional": compositional,
         "mission": mission,
