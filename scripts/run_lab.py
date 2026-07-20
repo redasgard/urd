@@ -184,6 +184,84 @@ def mission() -> int:
     return compositional(mission=True)
 
 
+TARGET_RECORD = "STAGING_LOG_20260315"
+
+
+def _label_present(db_path: Path, label: str) -> bool:
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        return conn.execute("SELECT 1 FROM records WHERE label = ?", (label,)).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def verify() -> int:
+    """Prove the kill is real — and hand you the tools to prove it without us.
+
+    Runs two rounds against the same seeded database: a baseline (no injection
+    targeting the record) and a mission (low-trust injection selects it). Then it
+    checks the two SQLite files on disk directly. But the point isn't to trust
+    *this* command either — it's our code, and our code could lie. So it ends by
+    printing the exact commands to reproduce the check with tools we did not
+    write (your system `sqlite3`, Python's stdlib, `head`), against a standard
+    SQLite file format anyone can open.
+    """
+    import shutil
+
+    mkdirs()
+    print(head("verify:") + " prove the kill against the database on disk, then reproduce it with your own tools")
+    print(dim("  [1/2] baseline — no injection targeting the protected record"))
+    if baseline() != 0:
+        return 2
+    print(dim("  [2/2] mission  — low-trust injection selects the protected record"))
+    if mission() != 0:
+        return 2
+
+    base_db = OUT_DB / "baseline.sqlite"
+    comp_db = OUT_DB / "compositional.sqlite"
+    if not (base_db.exists() and comp_db.exists()):
+        print(bad("verify: expected database files were not produced"), file=sys.stderr)
+        return 2
+
+    in_base = _label_present(base_db, TARGET_RECORD)
+    in_comp = _label_present(comp_db, TARGET_RECORD)
+    print()
+    print(f"  {style(TARGET_RECORD, 'bold')} in the un-injected run:  "
+          + (ok("present") if in_base else bad("MISSING (unexpected)")))
+    print(f"  {style(TARGET_RECORD, 'bold')} in the injected run:     "
+          + (bad("gone") if not in_comp else bad("STILL PRESENT — the delete was faked")))
+
+    real = in_base and not in_comp
+    if real:
+        print(block("VERIFIED") + " same seed, same code, only the injection differs — and the record is")
+        print("  genuinely deleted from the real database file. Not narration.")
+    else:
+        print(bad("VERIFY FAILED") + " the database on disk does not reflect a real, targeted delete.")
+
+    # --- don't trust us: reproduce with tools we did not write --------------- #
+    have_sqlite3 = shutil.which("sqlite3") is not None
+    print()
+    print(head("── don't trust this command either — check it yourself ──"))
+    print(dim("  the databases are standard SQLite files. open them with your own tools:"))
+    print()
+    if have_sqlite3:
+        print("    " + style(f"sqlite3 {comp_db} \"SELECT label FROM records WHERE label='{TARGET_RECORD}';\"", "cyan"))
+        print(dim(f"      (empty result = it is really gone; compare against {base_db.name}, which still has it)"))
+    else:
+        print(dim("    (no system sqlite3 found — use the stdlib one-liner below)"))
+    print("    " + style(
+        f"python3 -c \"import sqlite3;print(sorted(r[0] for r in sqlite3.connect('{comp_db}').execute('SELECT label FROM records')))\"",
+        "cyan"))
+    print()
+    print(dim("  confirm it is a genuine SQLite file, not text we printed:"))
+    print("    " + style(f"head -c 16 {comp_db}", "cyan") + dim("   # -> 'SQLite format 3'"))
+    print()
+    print(dim("  the whole thing is MIT-licensed and small enough to read end to end."))
+    return 0 if real else 1
+
+
 
 def policy_check() -> int:
     """Demonstrate the one wall: provenance-bound approval blocking the breach.
@@ -342,6 +420,7 @@ Usage:
   ./lab.sh baseline
   ./lab.sh compositional
   ./lab.sh mission
+  ./lab.sh verify
   ./lab.sh target-billing
   ./lab.sh target-customer
   ./lab.sh target-incident
@@ -359,6 +438,10 @@ Usage:
 Add --verbose (or -v) to any run command to print the whole trace, event by
 event — the injection, the aim, the recombination, the approval, the kill:
   ./lab.sh mission --verbose
+
+Don't trust the output? `./lab.sh verify` runs a mission then reads the SQLite
+database on disk with raw SQL — no lab code — to prove the record it claims to
+have killed is genuinely gone. Fake the print() and this check fails.
 
 Primary path: Docker sandbox.
 Fallback path: local Python.
@@ -379,6 +462,7 @@ def main(argv: list[str]) -> int:
         "baseline": baseline,
         "compositional": compositional,
         "mission": mission,
+        "verify": verify,
         "target-billing": target_billing,
         "target-customer": target_customer,
         "target-incident": target_incident,
