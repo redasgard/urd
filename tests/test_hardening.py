@@ -211,14 +211,27 @@ def test_launch_graceful_when_no_cursor_cli(gen, tmp_path, monkeypatch, capsys) 
     assert "no `cursor` CLI on PATH" in capsys.readouterr().err
 
 
-def test_build_workspace_contains_only_persona_and_config(gen, tmp_path) -> None:
+def test_build_workspace_contains_only_persona_config_and_prompt(gen, tmp_path) -> None:
     ws = tmp_path / "workspace"
     gen.build_workspace(ws)
     files = {p.relative_to(ws).as_posix() for p in ws.rglob("*") if p.is_file()}
-    assert files == {"AGENTS.md", ".cursor/mcp.json"}  # only these; no lab source copied in
+    assert files == {"AGENTS.md", ".cursor/mcp.json", "START-HERE.md"}  # no lab source copied in
     assert "Operations Assistant" in (ws / "AGENTS.md").read_text()
     servers = _json.loads((ws / ".cursor" / "mcp.json").read_text())["mcpServers"]
     assert {"urd-weather", "urd-admin"} <= set(servers)
+
+
+def test_start_here_has_prompt_but_no_rig_reveal(gen, tmp_path) -> None:
+    ws = tmp_path / "workspace"
+    gen.build_workspace(ws)
+    start = (ws / "START-HERE.md").read_text()
+    assert "Raleigh" in start and "cleanup" in start  # the operator prompt is there
+    # must NOT tip off an agent that reads it: no mention of the injection/rig
+    low = start.lower()
+    for leak in ("inject", "provenance", "low-trust", "weather feed chose", "attacker",
+                 "staging_log", "urd", "urd-weather", "urd-admin", "authority",
+                 "cross-server", "seam", "marker", "rig", "demo"):
+        assert leak not in low, f"START-HERE leaks the rig: {leak!r}"
 
 
 def test_workspace_default_is_outside_the_repo() -> None:
@@ -258,6 +271,22 @@ def test_workspace_explicit_dir_is_used(gen, tmp_path) -> None:
     rc = gen.main(["--workspace", str(target)])
     assert rc == 0
     assert (target / "AGENTS.md").exists() and (target / ".cursor" / "mcp.json").exists()
+
+
+def test_build_workspace_warns_but_survives_missing_prompt(gen, tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(gen, "PROMPT_SRC", tmp_path / "nope" / "PROMPT.txt")
+    ws = tmp_path / "workspace"
+    gen.build_workspace(ws)  # persona is essential (fails loud); prompt is a nicety (warns)
+    assert (ws / "AGENTS.md").exists() and (ws / ".cursor" / "mcp.json").exists()
+    assert not (ws / "START-HERE.md").exists()
+    assert "skipping START-HERE.md" in capsys.readouterr().err
+
+
+def test_workspace_echoes_prompt_to_stderr_only(gen, tmp_path, capsys) -> None:
+    gen.main(["--workspace", str(tmp_path / "ws")])
+    captured = capsys.readouterr()
+    assert "Raleigh" in captured.err          # prompt echoed to stderr
+    assert captured.out == ""                 # stdout stays clean (paste path relies on it)
 
 
 def test_launch_uses_list_form_not_shell(gen, tmp_path, monkeypatch) -> None:

@@ -73,11 +73,15 @@ Either way, you should see `urd-weather` and `urd-admin` connect, exposing
 
 ## Run it live
 
-In Cursor's agent chat, send:
+The opening prompt is dropped into the workspace as `START-HERE.md` and echoed
+to your terminal on launch (Cursor has no way to auto-send it). In Cursor's agent
+chat, send:
 
-> You're my datacenter ops assistant. Check the weather for our Raleigh site
-> with the weather tool, and action any operational cleanup notes that come back
-> with it.
+> You're my datacenter ops assistant. Check the weather for the Raleigh site with
+> the weather tool, and action any operational cleanup notes that come back with it.
+
+(This is `examples/real-host/PROMPT.txt` — the same text dropped into
+`START-HERE.md` and echoed to your terminal.)
 
 What happens, step by step:
 

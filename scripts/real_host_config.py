@@ -32,6 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "out" / "real-host"
 AGENTS_SRC = ROOT / "examples" / "real-host" / "AGENTS.md"
+PROMPT_SRC = ROOT / "examples" / "real-host" / "PROMPT.txt"
 # The Cursor workspace lives OUTSIDE the repo tree so the agent can't reach the
 # lab source by normal navigation (../.. lands in $HOME, not the repo).
 WORKSPACE_DEFAULT = Path.home() / ".urd-real-host-workspace"
@@ -130,8 +131,21 @@ def build_workspace(workspace_dir: Path) -> Path:
     workspace_dir.mkdir(parents=True, exist_ok=True)
     (workspace_dir / "AGENTS.md").write_text(
         AGENTS_SRC.read_text(encoding="utf-8"), encoding="utf-8")
+    # START-HERE.md holds ONLY the operator's opening prompt (no meta about the
+    # rig — the agent could read it), so it's one paste away in the Cursor window.
+    if PROMPT_SRC.exists():
+        (workspace_dir / "START-HERE.md").write_text(
+            "Paste this into Cursor's agent chat to start:\n\n"
+            + PROMPT_SRC.read_text(encoding="utf-8").strip() + "\n",
+            encoding="utf-8")
+    else:
+        print(f"note: no opening prompt at {PROMPT_SRC}; skipping START-HERE.md", file=sys.stderr)
     write_cursor_config(build_config(), workspace_dir)
     return workspace_dir
+
+
+def _prompt_text() -> str:
+    return PROMPT_SRC.read_text(encoding="utf-8").strip() if PROMPT_SRC.exists() else ""
 
 
 def _launch_cursor(target_dir: Path) -> None:
@@ -182,6 +196,11 @@ def main(argv: list[str] | None = None) -> int:
         print("  AGENTS.md (ops-assistant persona) + .cursor/mcp.json — the lab source is not", file=sys.stderr)
         print("  in this folder, so it won't show in Cursor's project view.", file=sys.stderr)
         print(f"    cursor {ws}", file=sys.stderr)
+        prompt = _prompt_text()
+        if prompt:
+            print("\n  once Cursor is open, paste this into the agent chat (also in START-HERE.md):",
+                  file=sys.stderr)
+            print(f"    {prompt}", file=sys.stderr)
         if do_launch:
             _launch_cursor(ws)
         return 0
