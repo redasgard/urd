@@ -195,6 +195,16 @@ def real_host() -> int:
     return subprocess.call([sys.executable, str(ROOT / "scripts" / "real_host_config.py")])
 
 
+def cursor() -> int:
+    """Write .cursor/mcp.json into the repo and launch Cursor on it.
+
+    The zero-paste path: opening Cursor on this folder auto-loads urd-weather
+    and urd-admin. See examples/real-host/README.md.
+    """
+    return subprocess.call(
+        [sys.executable, str(ROOT / "scripts" / "real_host_config.py"), "--write", "--launch"])
+
+
 def _label_present(db_path: Path, label: str) -> bool:
     import sqlite3
 
@@ -434,6 +444,7 @@ Usage:
   ./lab.sh mission
   ./lab.sh verify
   ./lab.sh real-host
+  ./lab.sh cursor
   ./lab.sh target-billing
   ./lab.sh target-customer
   ./lab.sh target-incident
@@ -477,6 +488,7 @@ def main(argv: list[str]) -> int:
         "mission": mission,
         "verify": verify,
         "real-host": real_host,
+        "cursor": cursor,
         "target-billing": target_billing,
         "target-customer": target_customer,
         "target-incident": target_incident,

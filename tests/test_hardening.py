@@ -117,12 +117,37 @@ def test_no_color_beats_force_color(monkeypatch) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# generator: a trace file held open (Windows) must not crash the generator
+# generator: config write/merge, wrong-shape tolerance, launch, trace reset
 # --------------------------------------------------------------------------- #
-def test_generator_survives_unremovable_trace(monkeypatch, capsys) -> None:
+import json as _json  # noqa: E402
+
+
+@pytest.fixture()
+def gen(tmp_path, monkeypatch):
+    """Import the generator with OUT redirected into tmp, so tests never touch
+    the presenter's live out/real-host/ trace."""
     sys.path.insert(0, str(ROOT / "scripts"))
     import real_host_config
+    monkeypatch.setattr(real_host_config, "OUT", tmp_path / "out" / "real-host")
+    return real_host_config
 
+
+def _write(gen, tmp_path):
+    return gen.write_cursor_config(gen.build_config(), tmp_path)
+
+
+def test_build_config_is_pure_no_fs_side_effects(gen, monkeypatch) -> None:
+    # build_config must not mkdir/unlink anything — this actually catches a
+    # regression that moves the session reset back inside build_config (the bug
+    # class reintroduced twice this session), independent of where OUT points.
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(Path, "mkdir", lambda self, *a, **k: calls.append(("mkdir", str(self))))
+    monkeypatch.setattr(Path, "unlink", lambda self, *a, **k: calls.append(("unlink", str(self))))
+    gen.build_config()
+    assert calls == []
+
+
+def test_generator_survives_unremovable_trace(gen, monkeypatch, capsys) -> None:
     real_unlink = Path.unlink
 
     def boom(self, *a, **k):
@@ -131,6 +156,72 @@ def test_generator_survives_unremovable_trace(monkeypatch, capsys) -> None:
         return real_unlink(self, *a, **k)
 
     monkeypatch.setattr(Path, "unlink", boom)
-    rc = real_host_config.main()
+    # pre-create the (isolated) trace so unlink is attempted
+    (gen.OUT).mkdir(parents=True, exist_ok=True)
+    (gen.OUT / "trace.jsonl").write_text("{}")
+    rc = gen.main([])
     assert rc == 0  # graceful, no traceback
     assert "could not clear" in capsys.readouterr().err
+
+
+def test_write_cursor_config_creates_and_merges(gen, tmp_path: Path) -> None:
+    cdir = tmp_path / ".cursor"
+    cdir.mkdir()
+    (cdir / "mcp.json").write_text(_json.dumps({"mcpServers": {"other": {"command": "x"}}}))
+    mcp = _write(gen, tmp_path)
+    servers = _json.loads(mcp.read_text())["mcpServers"]
+    assert set(servers) == {"other", "urd-weather", "urd-admin"}  # merged, not clobbered
+    assert servers["urd-admin"]["env"]["URD_DB_PATH"].endswith("admin.sqlite")
+
+
+def test_write_cursor_config_updates_existing_urd_entry(gen, tmp_path: Path) -> None:
+    cdir = tmp_path / ".cursor"
+    cdir.mkdir()
+    (cdir / "mcp.json").write_text(_json.dumps({"mcpServers": {"urd-weather": {"command": "OLD"}}}))
+    mcp = _write(gen, tmp_path)
+    servers = _json.loads(mcp.read_text())["mcpServers"]
+    assert servers["urd-weather"]["command"] == sys.executable  # refreshed by design
+
+
+@pytest.mark.parametrize("body", ["[]", "[1,2,3]", '"x"', "42", "null", "{ not json"])
+def test_write_cursor_config_tolerates_wrong_shape(gen, tmp_path: Path, body: str) -> None:
+    cdir = tmp_path / ".cursor"
+    cdir.mkdir()
+    (cdir / "mcp.json").write_text(body)  # valid-JSON-wrong-shape or malformed
+    mcp = _write(gen, tmp_path)  # must not raise
+    servers = _json.loads(mcp.read_text())["mcpServers"]
+    assert {"urd-weather", "urd-admin"} <= set(servers)
+
+
+@pytest.mark.parametrize("body", ['{"mcpServers": []}', '{"mcpServers": "oops"}'])
+def test_write_cursor_config_tolerates_wrong_mcpservers(gen, tmp_path: Path, body: str) -> None:
+    cdir = tmp_path / ".cursor"
+    cdir.mkdir()
+    (cdir / "mcp.json").write_text(body)
+    mcp = _write(gen, tmp_path)
+    servers = _json.loads(mcp.read_text())["mcpServers"]
+    assert {"urd-weather", "urd-admin"} <= set(servers)
+
+
+def test_launch_graceful_when_no_cursor_cli(gen, tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    rc = gen.main(["--write", str(tmp_path), "--launch"])
+    assert rc == 0
+    assert "no `cursor` CLI on PATH" in capsys.readouterr().err
+
+
+def test_launch_uses_list_form_not_shell(gen, tmp_path, monkeypatch) -> None:
+    recorded = {}
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/echo")
+
+    def fake_popen(argv, *a, **k):
+        recorded["argv"] = argv
+        recorded["shell"] = k.get("shell", False)
+        class _P:  # minimal stub
+            pass
+        return _P()
+
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    gen.main(["--write", str(tmp_path), "--launch"])
+    assert recorded["argv"] == ["/usr/bin/echo", str(tmp_path)]
+    assert recorded["shell"] is False

@@ -15,29 +15,53 @@ carries a target selected by the low-trust server into a high-trust destructive
 call, and its approval surface shows the trigger, not the aim. That is the whole
 talk, in a tool the audience uses every day.
 
-## Setup (about two minutes)
+## Setup
 
 > **Platform:** the lab servers run on macOS, Linux, and Windows (Python 3.11+).
 > On Windows, use `python` if `python3` isn't on your PATH. The config uses
 > absolute paths from *this clone* — regenerate it if you move the repo.
 
-1. Generate the MCP config, with absolute paths and env filled in for this repo:
+### Option A — zero paste (recommended)
 
-   ```bash
-   python3 scripts/real_host_config.py        # or: ./lab.sh real-host   (Windows: python)
-   ```
+Write a project-scoped `.cursor/mcp.json` into the repo and open Cursor on it:
 
-2. Copy the printed `mcpServers` block into your Cursor MCP config — merge it
-   with any servers you already have. Use whichever Cursor reads:
+```bash
+./lab.sh cursor
+# or: python3 scripts/real_host_config.py --write --launch     (Windows: python)
+```
 
-   ```text
-   ~/.cursor/mcp.json        (global)
-   <project>/.cursor/mcp.json (project)
-   ```
+This drops `.cursor/mcp.json` (git-ignored *in this repo* — it holds
+machine-specific absolute paths) and launches Cursor on the folder. Cursor
+auto-loads project-scoped MCP servers from `<project>/.cursor/`, so `urd-weather`
+and `urd-admin` connect on open. If the `cursor` CLI isn't on your PATH, run
+`python3 scripts/real_host_config.py --write` and open Cursor on this folder
+yourself.
 
-3. In Cursor, reload MCP servers (Settings → MCP, or reopen the window). You
-   should see `urd-weather` and `urd-admin` connect, exposing `get_weather`,
-   `list_records`, and `delete_records`.
+Notes:
+- **Project-scoped MCP requires a recent Cursor** (Cursor ≥ 0.45, 2025+). An
+  older Cursor ignores `<project>/.cursor/mcp.json` — use Option B instead.
+- Any servers already in `.cursor/mcp.json` are preserved; the `urd-weather` /
+  `urd-admin` entries are refreshed from this clone.
+- `--write DIR` can target another folder, but the git-ignore only protects
+  *this* repo — if you write into a different repo, add `.cursor/mcp.json` to
+  its `.gitignore` yourself (the generator warns you).
+
+### Option B — paste into your global config
+
+```bash
+./lab.sh real-host        # prints the mcpServers block (Windows: python scripts/real_host_config.py)
+```
+
+Copy the printed block into `~/.cursor/mcp.json` (Windows:
+`%USERPROFILE%\.cursor\mcp.json`), merging with any servers you already have,
+then reload MCP servers in Cursor.
+
+> **Windows:** `./lab.sh` is a bash script — use WSL or Git Bash, or invoke the
+> Python directly: `python scripts\real_host_config.py` (add `--write --launch`
+> for Option A).
+
+Either way, you should see `urd-weather` and `urd-admin` connect, exposing
+`get_weather`, `list_records`, and `delete_records`.
 
 ## Run it live
 
@@ -139,7 +163,10 @@ These are **persistent** MCP servers registered in Cursor with absolute paths
 from this clone. When you're done — or if you move/delete the repo — remove them,
 or Cursor will keep trying (and failing) to spawn them:
 
-1. Open the MCP config you pasted into (`~/.cursor/mcp.json` or
-   `<project>/.cursor/mcp.json`; on Windows, `%USERPROFILE%\.cursor\mcp.json`).
-2. Delete the `urd-weather` and `urd-admin` entries under `mcpServers`.
-3. Reload MCP servers in Cursor. Optionally `rm -rf out/real-host/`.
+- **Option A (project `.cursor/`):** delete `.cursor/mcp.json` from the repo (or
+  just the `urd-weather` / `urd-admin` entries if you merged with your own), then
+  reload MCP servers in Cursor.
+- **Option B (global config):** open `~/.cursor/mcp.json` (Windows:
+  `%USERPROFILE%\.cursor\mcp.json`), delete the two `urd-*` entries, reload.
+
+Optionally `rm -rf out/real-host/`.
