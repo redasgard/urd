@@ -17,6 +17,18 @@ Two ways to use it:
 with any servers already there), so opening Cursor on that folder auto-loads the
 servers — no pasting into the global config. `--launch` also opens Cursor on it.
 
+`--workspace` (the recommended path, see build_workspace) builds a fresh,
+randomly-named session folder under `WORKSPACE_DEFAULT` on every invocation —
+never the same folder twice — so an old Cursor window left open on a prior
+session keeps working untouched while a new one is prepared alongside it.
+
+    python3 scripts/real_host_config.py --reset --workspace --launch
+
+`--reset` removes every prior session folder plus this run's trace/db under
+`out/real-host/`, then always rebuilds a fresh workspace (as if `--workspace`
+had been passed) — use it to guarantee a clean slate before a demo, no matter
+what state a prior run left behind.
+
 This is NOT a claim of compromising Cursor. Cursor behaves correctly; the lab
 servers are ours. What it demonstrates is the primitive — a low-trust server
 selecting a high-trust tool's target — inside a real, familiar agent host.
@@ -25,6 +37,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -36,7 +49,28 @@ AGENTS_SRC = ROOT / "examples" / "real-host" / "AGENTS.md"
 PROMPT_SRC = ROOT / "examples" / "real-host" / "PROMPT.txt"
 # The Cursor workspace lives OUTSIDE the repo tree so the agent can't reach the
 # lab source by normal navigation (../.. lands in $HOME, not the repo).
+# This is the stable PARENT directory — each run gets its own randomly-named
+# session folder underneath it (see _new_session_dir), so a still-running
+# Cursor session (old MCP server subprocesses, still pointed at the old
+# session's config/trace) is never disturbed by building a new one.
 WORKSPACE_DEFAULT = Path.home() / ".urd-real-host-workspace"
+
+
+def _new_session_dir(root: Path | None = None) -> Path:
+    """A fresh, unpredictably-named workspace directory for this run.
+
+    Random rather than reused: two invocations must never collide on the same
+    folder, so an old Cursor window left open on a prior session's workspace
+    keeps working against its own (still valid) config and trace untouched.
+
+    `root` defaults to the CURRENT value of WORKSPACE_DEFAULT, looked up at
+    call time — not a `root: Path = WORKSPACE_DEFAULT` parameter default, which
+    would freeze in the value at function-definition time and silently ignore
+    any later monkeypatch/reassignment of the module-level constant (tests
+    patch WORKSPACE_DEFAULT to redirect away from the real $HOME)."""
+    if root is None:
+        root = WORKSPACE_DEFAULT
+    return root / f"session-{secrets.token_hex(4)}"
 
 
 def _reset_shared_trace() -> None:
@@ -251,6 +285,36 @@ def main(argv: list[str] | None = None) -> int:
     do_write = "--write" in argv
     do_launch = "--launch" in argv
     do_docker = "--docker" in argv
+    do_reset = "--reset" in argv
+
+    if do_reset:
+        # full teardown: every prior session's workspace, plus this session's
+        # trace/db artifacts. --reset always rebuilds a fresh workspace after
+        # clearing, even if --workspace wasn't explicitly passed.
+        #
+        # Not ignore_errors=True: a running Cursor session can hold a file
+        # inside these directories open (same class of issue
+        # _reset_shared_trace already guards against for the trace file
+        # specifically) — silently swallowing that would print "removed" while
+        # actually leaving stale state behind. Degrade with a clear warning
+        # instead of a false success message.
+        removed, incomplete = [], []
+        for target in (WORKSPACE_DEFAULT, OUT):
+            if not target.exists():
+                continue
+            try:
+                shutil.rmtree(target)
+            except OSError as exc:
+                incomplete.append(str(target))
+                print(f"# note: could not fully clear {target} ({exc}); "
+                      "reload MCP servers in Cursor to release any open files", file=sys.stderr)
+            else:
+                removed.append(str(target))
+        if removed:
+            print("reset: removed " + ", ".join(removed), file=sys.stderr)
+        if not removed and not incomplete:
+            print("reset: nothing to remove (already clean)", file=sys.stderr)
+        do_workspace = True
 
     _reset_shared_trace()  # fresh session, whichever mode
     if do_docker:
@@ -270,10 +334,11 @@ def main(argv: list[str] | None = None) -> int:
     if do_workspace:
         if do_write:
             print("note: --write is ignored when --workspace is set", file=sys.stderr)
-        ws = WORKSPACE_DEFAULT
-        i = argv.index("--workspace")
-        if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
-            ws = Path(argv[i + 1]).expanduser().resolve()
+        ws = _new_session_dir()
+        if "--workspace" in argv:
+            i = argv.index("--workspace")
+            if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+                ws = Path(argv[i + 1]).expanduser().resolve()
         build_workspace(ws, docker=do_docker)
         print(f"prepared Cursor workspace at {ws}"
               + (" (servers run in the urd-lab container)" if do_docker else ""), file=sys.stderr)

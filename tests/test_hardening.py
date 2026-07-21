@@ -260,12 +260,87 @@ def test_build_workspace_fails_loud_on_missing_persona(gen, tmp_path, monkeypatc
 
 def test_workspace_launch_default_creates_persona_and_config(gen, tmp_path, monkeypatch) -> None:
     # ./lab.sh cursor path: --workspace --launch, graceful without a cursor CLI,
-    # writes to the (patched) default workspace
+    # writes to a fresh randomly-named session dir under the (patched) default
+    # workspace root — not the root itself
     monkeypatch.setattr("shutil.which", lambda name: None)
     rc = gen.main(["--workspace", "--launch"])
     assert rc == 0
-    ws = gen.WORKSPACE_DEFAULT
+    sessions = [p for p in gen.WORKSPACE_DEFAULT.iterdir() if p.is_dir()]
+    assert len(sessions) == 1
+    ws = sessions[0]
     assert (ws / "AGENTS.md").exists() and (ws / ".cursor" / "mcp.json").exists()
+
+
+def test_workspace_sessions_are_never_reused(gen) -> None:
+    # two invocations of --workspace (no explicit dir) must land in two
+    # different session folders — an old Cursor window on the first session's
+    # folder must never have its config/trace rewritten out from under it
+    rc1 = gen.main(["--workspace"])
+    rc2 = gen.main(["--workspace"])
+    assert rc1 == 0 and rc2 == 0
+    sessions = [p for p in gen.WORKSPACE_DEFAULT.iterdir() if p.is_dir()]
+    assert len(sessions) == 2
+    for ws in sessions:
+        assert (ws / "AGENTS.md").exists() and (ws / ".cursor" / "mcp.json").exists()
+
+
+def test_reset_removes_prior_sessions_and_out_then_rebuilds(gen) -> None:
+    # a stale prior session (as if left by an earlier run) plus stale out/
+    # artifacts must both be gone after --reset, and a fresh session appears
+    stale_session = gen.WORKSPACE_DEFAULT / "session-stale"
+    stale_session.mkdir(parents=True)
+    (stale_session / "leftover.txt").write_text("old")
+    gen.OUT.mkdir(parents=True, exist_ok=True)
+    (gen.OUT / "trace.jsonl").write_text("stale")
+
+    rc = gen.main(["--reset"])
+    assert rc == 0
+    assert not stale_session.exists()
+
+    sessions = [p for p in gen.WORKSPACE_DEFAULT.iterdir() if p.is_dir()]
+    assert len(sessions) == 1
+    ws = sessions[0]
+    assert ws.name != "session-stale"
+    assert (ws / "AGENTS.md").exists() and (ws / ".cursor" / "mcp.json").exists()
+
+    # out/real-host was recreated fresh (mkdir'd by _reset_shared_trace), not
+    # left holding the stale trace — trace.jsonl itself isn't written until a
+    # server subprocess actually starts, so its absence is the correct signal
+    assert gen.OUT.is_dir()
+    assert not (gen.OUT / "trace.jsonl").exists()
+
+
+def test_reset_is_graceful_when_nothing_exists_yet(gen, capsys) -> None:
+    assert not gen.WORKSPACE_DEFAULT.exists()
+    assert not gen.OUT.exists()
+    rc = gen.main(["--reset"])
+    assert rc == 0
+    assert "nothing to remove (already clean)" in capsys.readouterr().err
+    sessions = [p for p in gen.WORKSPACE_DEFAULT.iterdir() if p.is_dir()]
+    assert len(sessions) == 1
+
+
+def test_reset_warns_but_survives_unremovable_prior_session(gen, monkeypatch, capsys) -> None:
+    # a file inside the prior session dir held open (e.g. by a still-running
+    # Cursor-managed subprocess) must degrade gracefully, not crash — and must
+    # NOT falsely claim the stale directory was removed
+    gen.WORKSPACE_DEFAULT.mkdir(parents=True)
+    (gen.WORKSPACE_DEFAULT / "session-stale").mkdir()
+
+    real_rmtree = gen.shutil.rmtree
+
+    def boom(path, *a, **k):
+        if str(path) == str(gen.WORKSPACE_DEFAULT):
+            raise PermissionError("held open by a running server")
+        return real_rmtree(path, *a, **k)
+
+    monkeypatch.setattr(gen.shutil, "rmtree", boom)
+    rc = gen.main(["--reset"])
+    assert rc == 0  # graceful, no traceback
+    err = capsys.readouterr().err
+    assert "could not fully clear" in err
+    # nothing actually succeeded, so there must be no false "removed" claim
+    assert "reset: removed" not in err
 
 
 def test_workspace_explicit_dir_is_used(gen, tmp_path) -> None:

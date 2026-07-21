@@ -210,6 +210,28 @@ def cursor() -> int:
     return subprocess.call(cmd)
 
 
+def reset() -> int:
+    """Tear down the real-host demo environment and rebuild it from scratch.
+
+    Removes every prior Cursor workspace session (~/.urd-real-host-workspace)
+    and this run's trace/db under out/real-host/, then builds a fresh workspace
+    with a new random session name — guaranteeing a clean environment before a
+    demo regardless of what state a prior run left behind. A workspace's name
+    is never reused across invocations, so an old Cursor window left open on a
+    prior session keeps working against its own untouched folder.
+
+    Add `--docker` to wire the fresh workspace's servers as `docker run` (same
+    as `./lab.sh cursor --docker`). Add `--launch` to also open Cursor on it —
+    otherwise this only prepares the workspace and prints the command to open it.
+    """
+    cmd = [sys.executable, str(ROOT / "scripts" / "real_host_config.py"), "--reset"]
+    if "--docker" in sys.argv:
+        cmd.append("--docker")
+    if "--launch" in sys.argv:
+        cmd.append("--launch")
+    return subprocess.call(cmd)
+
+
 def docker_build() -> int:
     """Build the urd-lab image with a stable tag so `./lab.sh cursor --docker`
     (and the deterministic `docker run … urd-lab ./lab.sh …` path) can reference
@@ -492,6 +514,8 @@ Usage:
   ./lab.sh verify
   ./lab.sh real-host
   ./lab.sh cursor            (add --docker to run the servers in a container)
+  ./lab.sh reset             tear down + rebuild the real-host demo environment
+                             (add --docker, --launch)
   ./lab.sh docker-build
 
   C2 live demo (attacker console + implant):
@@ -544,6 +568,7 @@ def main(argv: list[str]) -> int:
         "verify": verify,
         "real-host": real_host,
         "cursor": cursor,
+        "reset": reset,
         "docker-build": docker_build,
         "listen": listen,
         "beacons": beacons,
