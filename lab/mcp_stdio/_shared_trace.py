@@ -13,6 +13,7 @@ work unchanged once this is installed via urd.trace.set_default_writer.
 from __future__ import annotations
 
 import json
+import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -95,7 +96,15 @@ class SharedStdioTraceWriter:
     def emit(self, source: str, kind: str, payload: dict[str, Any]) -> None:
         # one lock guards both the sequence bump and the append, giving a true
         # global ordering consistent with real causal order across processes.
-        with open(self.seq_path, "r+", encoding="utf-8") as sf:
+        #
+        # O_CREAT (not plain "r+"): this writer is long-lived inside a server
+        # subprocess, but the counter file is not. If the operator regenerates
+        # the workspace (`./lab.sh cursor`) without reloading Cursor's MCP
+        # servers, _reset_shared_trace() unlinks the sidecar counter out from
+        # under an already-running writer; "r+" alone would then raise
+        # FileNotFoundError on the very next emit instead of self-healing.
+        fd = os.open(self.seq_path, os.O_RDWR | os.O_CREAT, 0o666)
+        with os.fdopen(fd, "r+", encoding="utf-8") as sf:
             with _exclusive_lock(sf):
                 raw = sf.read().strip()
                 seq = (int(raw) if raw else 0) + 1
