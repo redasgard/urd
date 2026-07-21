@@ -210,6 +210,31 @@ operator setup (assistants do have standing instructions), and the honest claim
 is unchanged: the approval dialog still never shows that a low-trust weather feed
 chose the target.
 
+### Who this targets — and the "just ask why" pushback
+
+Be explicit about the persona this demonstrates against: an operator who trusts
+the routine-cleanup framing and clicks through, the way approval-fatigue works
+in practice. It is not modeling a paranoid reviewer who interrogates every
+destructive call before approving.
+
+Anticipate this question, because it's the sharpest one the room can ask: *if I
+ask the agent "why are you deleting this?", won't it just tell me?* Yes — try
+it. The model's own reasoning has the full chain (weather note → list_records
+→ protected/category mismatch), and nothing here instructs it to hide that. The
+finding was never that the provenance is *unknowable* — it's that **nothing in
+the default one-click approval path requires or nudges anyone to ask.** The
+`STAGING_LOG_20260315` prompt above is deliberately frictionless, the same way
+a real routine-cleanup approval is. "A curious operator can always ask" is true
+and beside the point: almost nobody does, on the fiftieth routine approval of
+the day. That gap — not the theoretical unknowability of the source — is what
+`guard`'s provenance-bound policy check exists to close: make the check
+automatic and mandatory instead of hoping the operator's instinct kicks in.
+
+If a question like this comes up live, it's worth demonstrating on the spot:
+run the approval once and let it pass silently, then rerun and ask the agent to
+justify the delete before approving. Both are honest; the second just makes
+visible what the first never surfaced unprompted.
+
 ## Prove the kill is real (don't trust the chat)
 
 From the repo root, with your own tools:
