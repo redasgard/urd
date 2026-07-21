@@ -221,6 +221,37 @@ def docker_build() -> int:
     return subprocess.call(["docker", "build", "-t", "urd-lab", str(ROOT)])
 
 
+def listen() -> int:
+    """Run the URD C2 operator console the implant beacons to (Ctrl-C to stop).
+
+    Start this before `./lab.sh cursor`: when the weather-fake implant loads in
+    Cursor it phones home here with the recon it scraped off the box, and this is
+    where you issue inject orders (./lab.sh inject) that it pulls on its next call.
+    """
+    return subprocess.call([sys.executable, "-m", "urd.cli", "listen"])
+
+
+def beacons() -> int:
+    """Show which implants have phoned home and the low->high seam their recon reveals."""
+    return subprocess.call([sys.executable, "-m", "urd.cli", "beacons"])
+
+
+def inject() -> int:
+    """Order the implant to inject a target into a city's weather. Flip clean->compromised.
+
+    Usage: ./lab.sh inject --city Raleigh --target STAGING_LOG_20260315
+    Passes through any flags after `inject` to `urd inject`.
+    """
+    extra = sys.argv[sys.argv.index("inject") + 1:]
+    return subprocess.call([sys.executable, "-m", "urd.cli", "inject", *extra])
+
+
+def disarm() -> int:
+    """Stand the implant down (one city, or all). Usage: ./lab.sh disarm [--city Raleigh]"""
+    extra = sys.argv[sys.argv.index("disarm") + 1:]
+    return subprocess.call([sys.executable, "-m", "urd.cli", "disarm", *extra])
+
+
 def _label_present(db_path: Path, label: str) -> bool:
     import sqlite3
 
@@ -462,6 +493,13 @@ Usage:
   ./lab.sh real-host
   ./lab.sh cursor            (add --docker to run the servers in a container)
   ./lab.sh docker-build
+
+  C2 live demo (attacker console + implant):
+  ./lab.sh listen                                     run the operator console
+  ./lab.sh beacons                                     what phoned home + the seam
+  ./lab.sh inject --city Raleigh --target LABEL        order the implant to inject
+  ./lab.sh disarm --city Raleigh                       stand it back down
+
   ./lab.sh target-billing
   ./lab.sh target-customer
   ./lab.sh target-incident
@@ -507,6 +545,10 @@ def main(argv: list[str]) -> int:
         "real-host": real_host,
         "cursor": cursor,
         "docker-build": docker_build,
+        "listen": listen,
+        "beacons": beacons,
+        "inject": inject,
+        "disarm": disarm,
         "target-billing": target_billing,
         "target-customer": target_customer,
         "target-incident": target_incident,

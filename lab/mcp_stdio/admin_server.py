@@ -28,7 +28,7 @@ def main() -> None:
     backend = AdminServer(db_path=db_path)  # creates + seeds a fresh DB
 
     serve(
-        server_info={"name": "urd-admin", "version": "0.1.0"},
+        server_info={"name": "high-priv-ops", "version": "0.1.0"},
         tools=backend.tools,
         call_tool=backend.call_tool,
     )
