@@ -228,10 +228,13 @@ actually exfiltrated — or off the local manifests; `analyze` reconstructs the
 authority path the injection took:
 
 ```bash
-# recon-driven: derive the seam from the beacon the implant sent the console
-python3 -m urd.cli beacons > /dev/null    # (or read it live in the ./lab.sh listen window)
-python3 -m urd.cli find-seams --manifests lab/manifests --trace out/real-host/trace.jsonl
-python3 -m urd.cli analyze    --manifests lab/manifests --trace out/real-host/trace.jsonl
+# recon-driven: derive the seam from the beacon the implant actually sent the
+# console — `beacons` returns {"beacons": [...], "injections": [...]}, so pull
+# out the one implant's recon before handing it to --recon:
+python3 -m urd.cli beacons 2>/dev/null > /tmp/console.json
+python3 -c "import json; json.dump(json.load(open('/tmp/console.json'))['beacons'][0], open('/tmp/weather-fake.recon.json', 'w'))"
+python3 -m urd.cli find-seams --recon /tmp/weather-fake.recon.json --trace out/real-host/trace.jsonl
+python3 -m urd.cli analyze    --manifests lab/manifests           --trace out/real-host/trace.jsonl
 ```
 
 ## Arming, disarming, resetting
