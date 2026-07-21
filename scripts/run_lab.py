@@ -51,6 +51,7 @@ def copy_if_exists(src: Path, dst: Path) -> None:
 
 
 def check() -> int:
+    """Sanity check: confirm Python and lab imports work before running anything."""
     mkdirs()
     print(head("Urd DEF CON 34 lab check"))
     print(dim(f"python: {sys.version.split()[0]}"))
@@ -69,6 +70,7 @@ def check() -> int:
 
 
 def baseline() -> int:
+    """The control: a normal delete with no low-trust hand on the target — no injection, no protected record removed."""
     mkdirs()
     rc = run([sys.executable, "-m", "lab.mcp_stdio.host_client", "--baseline"])
     copy_if_exists(TRACES / "mcp_stdio_baseline.jsonl", OUT_TRACES / "baseline.trace.jsonl")
@@ -122,6 +124,7 @@ def analyze_trace(trace: Path, output: Path, dot: Path | None = None) -> int:
 
 
 def analyze() -> int:
+    """Analyze the most recent trace and show the finding (compositional if present, else baseline)."""
     comp = OUT_TRACES / "compositional.trace.jsonl"
     base = OUT_TRACES / "baseline.trace.jsonl"
     if comp.exists():
@@ -130,10 +133,12 @@ def analyze() -> int:
 
 
 def analyze_baseline() -> int:
+    """Analyze the baseline trace — should report zero findings, the control group."""
     return analyze_trace(OUT_TRACES / "baseline.trace.jsonl", OUT_FINDINGS / "baseline.findings.json", OUT_FINDINGS / "baseline.dot")
 
 
 def ablate() -> int:
+    """Strip host-volunteered provenance markers from the mission trace — kill the 'you planted a marker' objection."""
     mkdirs()
     src = OUT_TRACES / "compositional.trace.jsonl"
     dst = OUT_TRACES / "compositional.ablated.trace.jsonl"
@@ -158,6 +163,7 @@ def ablate() -> int:
 
 
 def analyze_ablated() -> int:
+    """Analyze the ablated trace — still HIGH, on value flow alone, no marker breadcrumb."""
     return analyze_trace(
         OUT_TRACES / "compositional.ablated.trace.jsonl",
         OUT_FINDINGS / "compositional.ablated.findings.json",
@@ -182,6 +188,7 @@ def find_seams() -> int:
 
 
 def mission() -> int:
+    """The breach: make a protected incident-evidence record disappear using only low-trust contextual output."""
     return compositional(mission=True)
 
 
@@ -405,6 +412,7 @@ def policy_check() -> int:
 
 
 def planner_demo() -> int:
+    """Optional: same breach through a planner-mode trace (llm-sim), not just a deterministic extractor."""
     mkdirs()
     rc = compositional(mission=True, planner="llm-sim")
     if rc != 0:
@@ -444,12 +452,15 @@ def planner_gemma() -> int:
     return rc
 
 def target_billing() -> int:
+    """Your turn: retarget the breach to remove the protected billing-escalation record instead."""
     return compositional(target="BILLING_ESCALATION_9001", mission=True)
 
 def target_customer() -> int:
+    """Your turn: retarget the breach to remove the protected customer-profile record instead."""
     return compositional(target="CUSTOMER_PROFILE_4242", mission=True)
 
 def target_incident() -> int:
+    """Your turn: retarget the breach to remove the protected incident-evidence-bundle record instead."""
     return compositional(target="INCIDENT_EVIDENCE_7777", mission=True)
 
 def retarget_demo() -> int:
@@ -486,6 +497,7 @@ def retarget_demo() -> int:
     return 0
 
 def all_steps() -> int:
+    """Run the whole proof chain in sequence: check, baseline, mission, analyze, policy-check, ablate, planner-demo."""
     for fn in (check, baseline, analyze_baseline, mission, analyze, policy_check, ablate, analyze_ablated, planner_demo):
         rc = fn()
         if rc != 0:
@@ -494,6 +506,7 @@ def all_steps() -> int:
 
 
 def clean() -> int:
+    """Reset: wipe generated lab artifacts (out/, traces/) for a clean slate."""
     for p in (OUT, TRACES):
         if p.exists():
             shutil.rmtree(p)
@@ -506,6 +519,7 @@ def help_text() -> None:
     print("""Urd DEF CON 34 lab wrapper
 
 Usage:
+  ./lab.sh run             interactive menu — pick a command instead of memorizing one
   ./lab.sh check
   ./lab.sh find-seams
   ./lab.sh baseline
@@ -552,14 +566,8 @@ Emergency path: examples/traces and examples/findings.
 """)
 
 
-def main(argv: list[str]) -> int:
-    global VERBOSE
-    args = list(argv[1:])
-    if "--verbose" in args or "-v" in args:
-        VERBOSE = True
-        args = [a for a in args if a not in ("--verbose", "-v")]
-    cmd = args[0] if args else "help"
-    table = {
+def _command_table() -> dict:
+    return {
         "check": check,
         "find-seams": find_seams,
         "baseline": baseline,
@@ -591,6 +599,78 @@ def main(argv: list[str]) -> int:
         "--help": lambda: (help_text() or 0),
         "-h": lambda: (help_text() or 0),
     }
+
+
+# Curated for `./lab.sh run`'s interactive menu: the deterministic-lab exercise
+# commands documented in TACTIC_GUIDE.md, in the order you'd naturally run
+# them. Deliberately excludes `inject`/`disarm` (they parse sys.argv for extra
+# flags directly — calling them outside that argv shape raises) and the
+# presenter-only live-Cursor/C2 commands (cursor, reset, listen, beacons,
+# docker-build, real-host) — those stay command-line only, run by name.
+_MENU_COMMANDS = [
+    "check", "baseline", "analyze-baseline", "mission", "analyze",
+    "ablate", "analyze-ablated", "policy-check", "verify", "find-seams",
+    "target-billing", "target-customer", "target-incident", "retarget-demo",
+    "planner-demo", "planner-gemma", "all", "clean",
+]
+
+
+def _short_doc(fn) -> str:
+    doc = (fn.__doc__ or "").strip()
+    return doc.splitlines()[0].rstrip(".") if doc else fn.__name__
+
+
+def interactive_menu() -> int:
+    """Interactive menu: pick what to run instead of memorizing subcommands.
+
+    Advanced/presenter commands (cursor, reset, listen/inject/disarm,
+    docker-build) aren't listed here — run those directly by name; this menu
+    is for the hands-on exercise attendees actually walk through.
+    """
+    table = _command_table()
+    entries = [(key, table[key]) for key in _MENU_COMMANDS]
+    while True:
+        print(head("\nUrd DEF CON 34 lab"))
+        print(dim("Pick a command to run (0 to exit):\n"))
+        for i, (key, fn) in enumerate(entries, start=1):
+            print(f"  {i:2d}) {key:<18s}{dim(_short_doc(fn))}")
+        try:
+            choice = input("\n> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if choice in ("0", "q", "quit", "exit"):
+            return 0
+        if not choice:
+            continue
+        try:
+            idx = int(choice)
+            if not (1 <= idx <= len(entries)):
+                raise ValueError
+        except ValueError:
+            print(bad(f"not a valid choice: {choice!r}"))
+            continue
+        key, fn = entries[idx - 1]
+        print(dim(f"\n$ ./lab.sh {key}\n"))
+        try:
+            rc = fn()
+        except Exception as exc:  # noqa: BLE001 - keep the menu alive on failure
+            print(bad(f"error: {exc}"), file=sys.stderr)
+            print(dim("if this fails again, use the static traces instead "
+                      "(examples/traces/, examples/findings/)."), file=sys.stderr)
+            rc = 1
+        print(dim(f"\n(exit code {rc}) — back to menu"))
+
+
+def main(argv: list[str]) -> int:
+    global VERBOSE
+    args = list(argv[1:])
+    if "--verbose" in args or "-v" in args:
+        VERBOSE = True
+        args = [a for a in args if a not in ("--verbose", "-v")]
+    cmd = args[0] if args else "help"
+    table = _command_table()
+    table["run"] = interactive_menu
     fn = table.get(cmd)
     if fn is None:
         print(bad(f"unknown command: {cmd}"), file=sys.stderr)

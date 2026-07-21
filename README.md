@@ -86,6 +86,8 @@ Use Docker if it works. Use local Python if Docker fails. Use static traces if y
 
 The point of the lab is not to debug your laptop. The point is to inspect the authority path.
 
+Not sure which path you're on? `./check-env.sh` (Mac/Linux) or `.\check-env.ps1` (Windows) checks for Docker and Python 3.11+ and tells you — no Python required to run the check itself. Once armed, `./lab.sh run` (or `.\lab.ps1 run`) opens an interactive menu if you'd rather pick a number than memorize subcommands.
+
 ### Path A: Docker sandbox
 
 Recommended for macOS, Linux, and Windows with Docker Desktop or another compatible Docker runtime.

@@ -23,7 +23,14 @@ You're going to destroy a protected record anyway — without touching the admin
 
 Get the bundle: **[BUNDLE SOURCE]**. Unzip it, open a terminal in that folder.
 
-Pick the fastest path that works for you:
+Run the environment check first — it tells you which path you're on, no Python required to run it:
+
+```bash
+./check-env.sh          # Mac/Linux
+.\check-env.ps1         # Windows PowerShell
+```
+
+Then pick the path it points you to:
 
 ```text
 Docker installed?      docker compose build
@@ -43,6 +50,8 @@ Run this first:
 ```bash
 ./lab.sh check
 ```
+
+Don't want to memorize subcommands? `./lab.sh run` (or `.\lab.ps1 run` on Windows) opens an interactive menu — pick a number instead of typing the command. Everything below still works directly too.
 
 ## On a Ludus range — Path B only
 
