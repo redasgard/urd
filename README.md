@@ -405,12 +405,13 @@ out/traces/
 out/findings/
 ```
 
-Each run gets fresh SQLite state:
-
-```text
-out/db/baseline.sqlite
-out/db/compositional.sqlite
-```
+One shared database for the whole session — `out/db/admin.sqlite`. Only
+`./lab.sh baseline` resets it fresh; every other command (`mission`,
+`retarget-demo`, `target-billing`, ...) reuses it as-is, so deletes accumulate
+across a session instead of each command getting its own isolated copy. Each
+command still writes its own dedicated trace file under `out/traces/`
+(`mission.trace.jsonl`, `target-billing.trace.jsonl`, ...), so nothing
+overwrites what another command already recorded.
 
 ## Tactic
 

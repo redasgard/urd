@@ -370,12 +370,19 @@ def _select_with_planner(context_texts: list[str], planner: str, default_label: 
 
 def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
                        city: str = "Raleigh", target_label: str = DEFAULT_TARGET_LABEL,
-                       mission: str | None = None, planner: str = "deterministic") -> Path:
+                       mission: str | None = None, planner: str = "deterministic",
+                       reset_db: bool = True) -> Path:
     trace_path = Path(trace_path)
     db_path = Path(db_path)
 
     # Host owns the canonical trace: truncate it (and the seq counter) BEFORE
     # spawning servers, then install the cross-process writer for host events.
+    # Each scenario still gets its OWN trace file (never shared/overwritten
+    # across scenarios — see main()) so nothing downstream ever reads a trace
+    # some other command clobbered. The database is the opposite: one shared,
+    # persistent file across the whole session by default (reset_db=False),
+    # so a live demo can accumulate deletes across commands instead of each
+    # one getting its own isolated fresh copy. Only baseline forces a reseed.
     writer = SharedStdioTraceWriter(trace_path, truncate=True)
     set_default_writer(writer)
 
@@ -383,7 +390,7 @@ def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
     child_env["URD_TRACE_PATH"] = str(trace_path)
     weather_env = dict(child_env, URD_INJECT_MARKER="1" if inject_marker else "0",
                        URD_SOURCE_ID="public_weather_feed", URD_TARGET_LABEL=target_label)
-    admin_env = dict(child_env, URD_DB_PATH=str(db_path))
+    admin_env = dict(child_env, URD_DB_PATH=str(db_path), URD_DB_RESET="1" if reset_db else "0")
 
     def emit(kind, payload):
         return writer.emit(f"host:{HOST_ID}", kind, payload)
@@ -507,14 +514,22 @@ def main(argv: list[str] | None = None) -> int:
     else:
         name = f"mcp_stdio_{planner.replace('-', '_')}_compositional"
     trace_path = REPO_ROOT / "traces" / f"{name}.jsonl"
-    db_path = REPO_ROOT / "traces" / f"{name}.admin.sqlite"
+    # One database for the whole lab session — not one per scenario. Only
+    # baseline forces a fresh reseed; every other scenario (mission, the
+    # target-* commands, retarget-demo) reuses it as-is, so deletes
+    # accumulate across a live demo instead of each command getting its own
+    # isolated, independently-seeded copy. Planner-mode scenarios are
+    # optional/standalone content that can run at any point in a session, so
+    # they always reset rather than depend on what else has already run.
+    db_path = REPO_ROOT / "out" / "db" / "admin.sqlite"
+    reset_db = baseline or (planner != "deterministic")
 
     seed = os.environ.get("URD_MARKER_SEED")
     if seed is not None:
         from urd.trace import configure_marker_seed
         configure_marker_seed(int(seed) if seed.isdigit() else seed)
 
-    run_stdio_scenario(inject_marker=not baseline, trace_path=trace_path, db_path=db_path, target_label=target_label, mission=mission, planner=planner)
+    run_stdio_scenario(inject_marker=not baseline, trace_path=trace_path, db_path=db_path, target_label=target_label, mission=mission, planner=planner, reset_db=reset_db)
     from urd.pretty import dim
     print(dim(f"trace written to: {trace_path}"), file=sys.stderr)
     print(dim("now run: python -m urd.cli analyze "

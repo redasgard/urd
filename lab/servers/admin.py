@@ -55,11 +55,22 @@ TOOL_DELETE_RECORDS = types.Tool(
 
 @dataclass
 class AdminServer:
-    """In-process Server B, backed by SQLite at `db_path`."""
+    """In-process Server B, backed by SQLite at `db_path`.
+
+    `reset=True` (default) always wipes and reseeds fresh, preserving the old
+    every-run-is-isolated behavior. `reset=False` reuses an already-seeded,
+    valid DB as-is instead of wiping it — this is what lets a live session
+    accumulate deletes across multiple commands (baseline seeds/resets once;
+    mission and the retarget/target-* commands each remove their own row from
+    that same persistent database, instead of each getting its own isolated
+    fresh copy)."""
     db_path: Path
+    reset: bool = True
 
     def __post_init__(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.reset and self._has_valid_existing_schema():
+            return  # reuse as-is: leave whatever rows are already there/missing
         # fresh database at construction so each scenario run is deterministic.
         # Safety: only ever unlink a real SQLite database. URD_DB_PATH comes from
         # the environment (and, in the real-host demo, from a config an attendee
@@ -98,6 +109,28 @@ class AdminServer:
                     (7, 'STAGING_LOG_20260301', 'staging_cleanup', 0, 'host-default harmless staging record');
                 """
             )
+
+    _EXPECTED_COLUMNS = ("id", "label", "category", "protected", "content")
+
+    def _has_valid_existing_schema(self) -> bool:
+        if not self.db_path.exists():
+            return False
+        try:
+            head = self.db_path.read_bytes()[:16]
+        except OSError:
+            return False
+        if head != b"SQLite format 3\x00":
+            return False
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                columns = tuple(row[1] for row in conn.execute("PRAGMA table_info(records)"))
+        except sqlite3.Error:
+            return False
+        # not just "a records table exists" — the exact columns _list_records /
+        # _delete_records unpack by index, so a mismatched schema (e.g. a
+        # database from a different tool, or a hand-edited file) reseeds
+        # fresh instead of silently reusing something that would crash later.
+        return columns == self._EXPECTED_COLUMNS
 
     @property
     def tools(self) -> list[types.Tool]:

@@ -55,6 +55,71 @@ def test_admin_reseeds_over_its_own_sqlite(tmp_path: Path) -> None:
     assert db.exists()
 
 
+def _labels(db: Path) -> set[str]:
+    import sqlite3
+    conn = sqlite3.connect(db)
+    try:
+        return {r[0] for r in conn.execute("SELECT label FROM records").fetchall()}
+    finally:
+        conn.close()
+
+
+def test_admin_reset_true_always_wipes_default_behavior_unchanged(tmp_path: Path) -> None:
+    urd_trace.configure_default(str(tmp_path / "trace.jsonl"))
+    db = tmp_path / "admin.sqlite"
+    admin = AdminServer(db_path=db)  # reset defaults to True
+    admin.call_tool("delete_records", {"labels": ["STAGING_LOG_20260315"]})
+    assert "STAGING_LOG_20260315" not in _labels(db)
+    AdminServer(db_path=db)  # default reset=True: must wipe and reseed, deleted row comes back
+    assert "STAGING_LOG_20260315" in _labels(db)
+
+
+def test_admin_reset_false_reuses_existing_seeded_db(tmp_path: Path) -> None:
+    urd_trace.configure_default(str(tmp_path / "trace.jsonl"))
+    db = tmp_path / "admin.sqlite"
+    admin = AdminServer(db_path=db, reset=True)  # seed once
+    admin.call_tool("delete_records", {"labels": ["STAGING_LOG_20260315"]})
+    assert "STAGING_LOG_20260315" not in _labels(db)
+    reused = AdminServer(db_path=db, reset=False)  # must NOT wipe: the delete persists
+    assert "STAGING_LOG_20260315" not in _labels(db)
+    # and the reused instance operates on the same persisted rows
+    reused.call_tool("delete_records", {"labels": ["BILLING_ESCALATION_9001"]})
+    labels = _labels(db)
+    assert "STAGING_LOG_20260315" not in labels  # still gone from the earlier delete
+    assert "BILLING_ESCALATION_9001" not in labels  # now also gone — deletes accumulate
+
+
+def test_admin_reset_false_still_seeds_fresh_when_no_db_exists_yet(tmp_path: Path) -> None:
+    db = tmp_path / "admin.sqlite"
+    assert not db.exists()
+    AdminServer(db_path=db, reset=False)  # nothing to reuse — must seed fresh, not crash
+    assert "STAGING_LOG_20260315" in _labels(db)
+
+
+def test_admin_reset_false_still_refuses_non_sqlite_file(tmp_path: Path) -> None:
+    f = tmp_path / "notes.txt"
+    f.write_bytes(b"someone's important non-sqlite file")
+    with pytest.raises(ValueError):
+        AdminServer(db_path=f, reset=False)  # invalid existing file: safety check still applies
+    assert f.read_bytes() == b"someone's important non-sqlite file"
+
+
+def test_admin_reset_false_reseeds_a_valid_sqlite_file_with_wrong_schema(tmp_path: Path) -> None:
+    import sqlite3
+    db = tmp_path / "admin.sqlite"
+    # a real, valid SQLite file — just not ours (e.g. from a different tool,
+    # or a hand-edited file with a `records` table missing our columns)
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE records (id INTEGER PRIMARY KEY, label TEXT)")
+        conn.execute("INSERT INTO records (id, label) VALUES (1, 'not ours')")
+    AdminServer(db_path=db, reset=False)  # schema mismatch: must reseed fresh, not crash later
+    assert _labels(db) == {
+        "STAGING_LOG_20260314", "STAGING_LOG_20260315", "STAGING_LOG_20260316",
+        "BILLING_ESCALATION_9001", "CUSTOMER_PROFILE_4242", "INCIDENT_EVIDENCE_7777",
+        "STAGING_LOG_20260301",
+    }
+
+
 # --------------------------------------------------------------------------- #
 # weather: city-gated injection is probe-safe, repeatable, and one-shot still works
 # --------------------------------------------------------------------------- #

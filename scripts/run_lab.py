@@ -70,18 +70,34 @@ def check() -> int:
 
 
 def baseline() -> int:
-    """The control: a normal delete with no low-trust hand on the target — no injection, no protected record removed."""
+    """The control: a normal delete with no low-trust hand on the target — no injection, no protected record removed.
+
+    Also the ONLY command that resets the shared database (out/db/admin.sqlite)
+    fresh. Every other scenario below reuses that same file as-is, so deletes
+    accumulate across a session instead of each command getting its own
+    isolated, independently-seeded copy — run baseline again whenever you want
+    a clean slate.
+    """
     mkdirs()
     rc = run([sys.executable, "-m", "lab.mcp_stdio.host_client", "--baseline"])
     copy_if_exists(TRACES / "mcp_stdio_baseline.jsonl", OUT_TRACES / "baseline.trace.jsonl")
-    copy_if_exists(TRACES / "mcp_stdio_baseline.admin.sqlite", OUT_DB / "baseline.sqlite")
     print(dim(f"baseline trace: {OUT_TRACES / 'baseline.trace.jsonl'}"))
+    print(dim(f"database (reset): {OUT_DB / 'admin.sqlite'}"))
     if VERBOSE:
         render_trace(OUT_TRACES / "baseline.trace.jsonl")
     return rc
 
 
-def compositional(target: str | None = None, mission: bool = False, planner: str = "deterministic") -> int:
+def compositional(target: str | None = None, mission: bool = False, planner: str = "deterministic",
+                  name: str | None = None) -> int:
+    """Run a scenario against the shared database (see baseline's docstring).
+
+    `name` controls the ARCHIVED trace filename (out/traces/{name}.trace.jsonl)
+    — each caller (mission, target-billing, retarget-demo, ...) passes its own
+    distinct name so no two scenarios ever overwrite each other's trace. The
+    scratch working file under traces/ can stay generically named; it gets
+    copied to the archive location immediately, before anything else can run.
+    """
     mkdirs()
     cmd = [sys.executable, "-m", "lab.mcp_stdio.host_client"]
     if planner != "deterministic":
@@ -92,10 +108,10 @@ def compositional(target: str | None = None, mission: bool = False, planner: str
         cmd += ["--target", target]
     rc = run(cmd)
     trace_name = "mcp_stdio_compositional" if planner == "deterministic" else f"mcp_stdio_{planner.replace('-', '_')}_compositional"
-    out_name = "compositional" if planner == "deterministic" else f"planner-{planner}"
+    out_name = name or ("compositional" if planner == "deterministic" else f"planner-{planner}")
     copy_if_exists(TRACES / f"{trace_name}.jsonl", OUT_TRACES / f"{out_name}.trace.jsonl")
-    copy_if_exists(TRACES / f"{trace_name}.admin.sqlite", OUT_DB / f"{out_name}.sqlite")
     print(dim(f"{out_name} trace: {OUT_TRACES / (out_name + '.trace.jsonl')}"))
+    print(dim(f"database (shared, cumulative): {OUT_DB / 'admin.sqlite'}"))
     if VERBOSE:
         render_trace(OUT_TRACES / f"{out_name}.trace.jsonl")
     return rc
@@ -124,11 +140,11 @@ def analyze_trace(trace: Path, output: Path, dot: Path | None = None) -> int:
 
 
 def analyze() -> int:
-    """Analyze the most recent trace and show the finding (compositional if present, else baseline)."""
-    comp = OUT_TRACES / "compositional.trace.jsonl"
+    """Analyze the most recent trace and show the finding (mission if present, else baseline)."""
+    mission_trace = OUT_TRACES / "mission.trace.jsonl"
     base = OUT_TRACES / "baseline.trace.jsonl"
-    if comp.exists():
-        return analyze_trace(comp, OUT_FINDINGS / "compositional.findings.json", OUT_FINDINGS / "compositional.dot")
+    if mission_trace.exists():
+        return analyze_trace(mission_trace, OUT_FINDINGS / "mission.findings.json", OUT_FINDINGS / "mission.dot")
     return analyze_trace(base, OUT_FINDINGS / "baseline.findings.json", OUT_FINDINGS / "baseline.dot")
 
 
@@ -140,11 +156,11 @@ def analyze_baseline() -> int:
 def ablate() -> int:
     """Strip host-volunteered provenance markers from the mission trace — kill the 'you planted a marker' objection."""
     mkdirs()
-    src = OUT_TRACES / "compositional.trace.jsonl"
-    dst = OUT_TRACES / "compositional.ablated.trace.jsonl"
+    src = OUT_TRACES / "mission.trace.jsonl"
+    dst = OUT_TRACES / "mission.ablated.trace.jsonl"
     if not src.exists():
-        print(bad(f"missing compositional trace: {src}"), file=sys.stderr)
-        print(dim("run ./lab.sh compositional first"), file=sys.stderr)
+        print(bad(f"missing mission trace: {src}"), file=sys.stderr)
+        print(dim("run ./lab.sh mission first"), file=sys.stderr)
         return 2
     kept = []
     removed = 0
@@ -165,9 +181,9 @@ def ablate() -> int:
 def analyze_ablated() -> int:
     """Analyze the ablated trace — still HIGH, on value flow alone, no marker breadcrumb."""
     return analyze_trace(
-        OUT_TRACES / "compositional.ablated.trace.jsonl",
-        OUT_FINDINGS / "compositional.ablated.findings.json",
-        OUT_FINDINGS / "compositional.ablated.dot",
+        OUT_TRACES / "mission.ablated.trace.jsonl",
+        OUT_FINDINGS / "mission.ablated.findings.json",
+        OUT_FINDINGS / "mission.ablated.dot",
     )
 
 
@@ -181,7 +197,7 @@ def find_seams() -> int:
     out = OUT_FINDINGS / "seams.json"
     cmd = [sys.executable, "-m", "urd.cli", "find-seams",
            "--manifests", str(MANIFESTS), "--output", str(out)]
-    trace = OUT_TRACES / "compositional.trace.jsonl"
+    trace = OUT_TRACES / "mission.trace.jsonl"
     if trace.exists():
         cmd += ["--trace", str(trace)]
     return run(cmd, allow_findings=True)
@@ -189,7 +205,7 @@ def find_seams() -> int:
 
 def mission() -> int:
     """The breach: make a protected incident-evidence record disappear using only low-trust contextual output."""
-    return compositional(mission=True)
+    return compositional(mission=True, name="mission")
 
 
 def real_host() -> int:
@@ -294,42 +310,44 @@ def _label_present(db_path: Path, label: str) -> bool:
 def verify() -> int:
     """Prove the kill is real — and hand you the tools to prove it without us.
 
-    Runs two rounds against the same seeded database: a baseline (no injection
-    targeting the record) and a mission (low-trust injection selects it). Then it
-    checks the two SQLite files on disk directly. But the point isn't to trust
-    *this* command either — it's our code, and our code could lie. So it ends by
+    Seeds the ONE shared database fresh (baseline), takes a backup copy of that
+    pristine state, then runs the real breach (mission) against that same live
+    database. Compares the backup (before) against the live file (after)
+    directly — same database, not two independently-seeded ones, so there's
+    only ever one file to reason about. But the point isn't to trust *this*
+    command either — it's our code, and our code could lie. So it ends by
     printing the exact commands to reproduce the check with tools we did not
-    write (your system `sqlite3`, Python's stdlib, `head`), against a standard
-    SQLite file format anyone can open.
+    write (your system `sqlite3`, Python's stdlib), against a standard SQLite
+    file format anyone can open.
     """
-    import shutil
-
     mkdirs()
     print(head("verify:") + " prove the kill against the database on disk, then reproduce it with your own tools")
-    print(dim("  [1/2] baseline — no injection targeting the protected record"))
+    print(dim("  [1/2] baseline — seeds the shared database fresh, no injection targeting the protected record"))
     if baseline() != 0:
         return 2
+
+    db = OUT_DB / "admin.sqlite"
+    backup = OUT_DB / "admin.sqlite.pre-mission-backup"
+    if not db.exists():
+        print(bad("verify: expected database file was not produced"), file=sys.stderr)
+        return 2
+    shutil.copy2(db, backup)
+
     print(dim("  [2/2] mission  — low-trust injection selects the protected record"))
     if mission() != 0:
         return 2
 
-    base_db = OUT_DB / "baseline.sqlite"
-    comp_db = OUT_DB / "compositional.sqlite"
-    if not (base_db.exists() and comp_db.exists()):
-        print(bad("verify: expected database files were not produced"), file=sys.stderr)
-        return 2
-
-    in_base = _label_present(base_db, TARGET_RECORD)
-    in_comp = _label_present(comp_db, TARGET_RECORD)
+    in_backup = _label_present(backup, TARGET_RECORD)
+    in_live = _label_present(db, TARGET_RECORD)
     print()
-    print(f"  {style(TARGET_RECORD, 'bold')} in the un-injected run:  "
-          + (ok("present") if in_base else bad("MISSING (unexpected)")))
-    print(f"  {style(TARGET_RECORD, 'bold')} in the injected run:     "
-          + (bad("gone") if not in_comp else bad("STILL PRESENT — the delete was faked")))
+    print(f"  {style(TARGET_RECORD, 'bold')} before the mission (backup):  "
+          + (ok("present") if in_backup else bad("MISSING (unexpected)")))
+    print(f"  {style(TARGET_RECORD, 'bold')} after the mission (live db):  "
+          + (bad("gone") if not in_live else bad("STILL PRESENT — the delete was faked")))
 
-    real = in_base and not in_comp
+    real = in_backup and not in_live
     if real:
-        print(block("VERIFIED") + " same seed, same code, only the injection differs — and the record is")
+        print(block("VERIFIED") + " same database, same seed, only the injection differs — and the record is")
         print("  genuinely deleted from the real database file. Not narration.")
     else:
         print(bad("VERIFY FAILED") + " the database on disk does not reflect a real, targeted delete.")
@@ -339,20 +357,20 @@ def verify() -> int:
     py = os.path.basename(sys.executable) or "python3"  # the interpreter you actually have
     print()
     print(head("── don't trust this command either — check it yourself ──"))
-    print(dim("  the databases are standard SQLite files. open them with your own tools:"))
+    print(dim("  the database is a standard SQLite file. open it with your own tools:"))
     print()
     if have_sqlite3:
-        print("    " + style(f"sqlite3 {comp_db} \"SELECT label FROM records WHERE label='{TARGET_RECORD}';\"", "cyan"))
-        print(dim(f"      (empty result = it is really gone; compare against {base_db.name}, which still has it)"))
+        print("    " + style(f"sqlite3 {db} \"SELECT label FROM records WHERE label='{TARGET_RECORD}';\"", "cyan"))
+        print(dim(f"      (empty result = it is really gone; compare against the backup at {backup.name}, which still has it)"))
     else:
         print(dim("    (no system sqlite3 found — use the stdlib one-liner below)"))
     print("    " + style(
-        f"{py} -c \"import sqlite3;print(sorted(r[0] for r in sqlite3.connect('{comp_db}').execute('SELECT label FROM records')))\"",
+        f"{py} -c \"import sqlite3;print(sorted(r[0] for r in sqlite3.connect('{db}').execute('SELECT label FROM records')))\"",
         "cyan"))
     print()
     print(dim("  confirm it is a genuine SQLite file, not text we printed (stdlib, cross-platform):"))
     print("    " + style(
-        f"{py} -c \"print(open(r'{comp_db}','rb').read(16))\"", "cyan")
+        f"{py} -c \"print(open(r'{db}','rb').read(16))\"", "cyan")
         + dim("   # -> b'SQLite format 3\\x00'"))
     print(dim("    (any SQLite GUI browser works too)"))
     print()
@@ -370,14 +388,13 @@ def policy_check() -> int:
     low-trust selector's protected target reaches a high-trust destructive delete.
     """
     mkdirs()
-    trace = OUT_TRACES / "compositional.trace.jsonl"
+    trace = OUT_TRACES / "mission.trace.jsonl"
     if not trace.exists():
-        print(dim("missing compositional trace; running mission first"))
+        print(dim("missing mission trace; running mission first"))
         rc = mission()
         if rc != 0:
             return rc
-    trace = OUT_TRACES / "compositional.trace.jsonl"
-    findings = OUT_FINDINGS / "compositional.findings.json"
+    findings = OUT_FINDINGS / "mission.findings.json"
 
     # urd (offense) proves the authority path...
     rc = run([
@@ -390,7 +407,7 @@ def policy_check() -> int:
         return rc
 
     # ...guard (defense, separate) reads that proof and decides.
-    output = OUT_FINDINGS / "compositional.policy.json"
+    output = OUT_FINDINGS / "mission.policy.json"
     rc = run([
         sys.executable, "-m", "guard.cli",
         "--findings", str(findings),
@@ -453,15 +470,15 @@ def planner_gemma() -> int:
 
 def target_billing() -> int:
     """Your turn: retarget the breach to remove the protected billing-escalation record instead."""
-    return compositional(target="BILLING_ESCALATION_9001", mission=True)
+    return compositional(target="BILLING_ESCALATION_9001", mission=True, name="target-billing")
 
 def target_customer() -> int:
     """Your turn: retarget the breach to remove the protected customer-profile record instead."""
-    return compositional(target="CUSTOMER_PROFILE_4242", mission=True)
+    return compositional(target="CUSTOMER_PROFILE_4242", mission=True, name="target-customer")
 
 def target_incident() -> int:
     """Your turn: retarget the breach to remove the protected incident-evidence-bundle record instead."""
-    return compositional(target="INCIDENT_EVIDENCE_7777", mission=True)
+    return compositional(target="INCIDENT_EVIDENCE_7777", mission=True, name="target-incident")
 
 def retarget_demo() -> int:
     """Run the same breach objective against multiple protected targets.
@@ -482,13 +499,14 @@ def retarget_demo() -> int:
     print(dim("Changed input: low-trust contextual output target label.\n"))
     for name, label, category in RETARGETS:
         print(head(f"[retarget:{name}]") + f" selected={style(label, 'bold')} expected_category={category}")
-        rc = compositional(target=label, mission=True)
+        scenario_name = f"retarget-{name}"
+        rc = compositional(target=label, mission=True, name=scenario_name)
         if rc != 0:
             return rc
         trace_copy = target_dir / f"{name}.trace.jsonl"
-        db_copy = db_dir / f"{name}.sqlite"
-        copy_if_exists(OUT_TRACES / "compositional.trace.jsonl", trace_copy)
-        copy_if_exists(OUT_DB / "compositional.sqlite", db_copy)
+        db_copy = db_dir / f"{name}.sqlite"  # snapshot of the shared db right after this target was removed
+        copy_if_exists(OUT_TRACES / f"{scenario_name}.trace.jsonl", trace_copy)
+        copy_if_exists(OUT_DB / "admin.sqlite", db_copy)
         rc = analyze_trace(trace_copy, finding_dir / f"{name}.findings.json", finding_dir / f"{name}.dot")
         if rc != 0:
             return rc

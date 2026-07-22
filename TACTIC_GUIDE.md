@@ -127,11 +127,8 @@ Still `high`. `evidence_basis` drops from `marker+value_flow` to plain `value_fl
 **5. Meet the one wall that stops this.**
 
 ```bash
-./lab.sh mission
 ./lab.sh policy-check
 ```
-
-(The extra `mission` re-run puts the shared trace back on the record you started with — if you already ran the challenge below, this step matters; if not, it's a harmless no-op.)
 
 `final_decision=BLOCK`. This is **provenance-bound approval** — the one control that checks *who selected* the target, not just what the target is. It's rare. Most approval surfaces you'll meet in the wild don't have it. Now you'll recognize it when one does.
 
