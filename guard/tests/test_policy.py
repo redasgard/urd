@@ -55,3 +55,14 @@ def test_allows_when_no_protected_state_changed() -> None:
     finding = dict(_BLOCK_FINDING, impact={"protected_records_removed": 0, "removed_categories": []})
     decision = evaluate_report({"findings": [finding]})
     assert decision["final_decision"] == "ALLOW"
+
+
+def test_any_block_among_multiple_findings_wins() -> None:
+    # non-blocking findings produce no decision object at all (only genuine
+    # BLOCK matches do); the synthetic ALLOW only appears when the list stays
+    # empty. Mixing one real BLOCK finding among clean ones must still BLOCK.
+    clean = dict(_BLOCK_FINDING, approval_provenance_status="present")
+    decision = evaluate_report({"findings": [clean, _BLOCK_FINDING, clean]})
+    assert decision["final_decision"] == "BLOCK"
+    kinds = [d["decision"] for d in decision["decisions"]]
+    assert kinds == ["BLOCK"]  # only the one genuinely unblocked-provenance finding produced a decision

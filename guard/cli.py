@@ -36,7 +36,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: invalid findings JSON: {exc}", file=sys.stderr)
         return 2
 
-    decision = evaluate_report(report)
+    try:
+        decision = evaluate_report(report)
+    except (AttributeError, TypeError, KeyError) as exc:
+        print(f"error: malformed findings report ({exc})", file=sys.stderr)
+        return 2
     output_text = json.dumps(decision, indent=2)
     if args.output:
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)

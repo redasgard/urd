@@ -23,6 +23,49 @@ def test_run_helper_and_interactive_menu_are_distinct() -> None:
     # regression guard: interactive_menu() must never collide with the
     # subprocess-running run(cmd, ...) helper other commands depend on
     assert run_lab.run is not run_lab.interactive_menu
+
+
+def test_retarget_demo_does_not_clobber_missions_trace_for_policy_check() -> None:
+    """Real, slow, end-to-end regression guard for this session's core fix.
+
+    host_client.py computes its trace/db paths from its own file location in
+    a separate subprocess, so this can't be cleanly isolated to a tmp_path —
+    it runs against the real repo's out/db + out/traces, same as the manual
+    verification done during development, with cleanup in finally regardless
+    of outcome. Reproduces the exact scenario that used to require a
+    "re-run mission before policy-check" workaround: mission runs first,
+    retarget-demo runs (and used to clobber the shared trace mission needed),
+    then policy-check must still report mission's own target untouched.
+    """
+    import json
+    try:
+        assert run_lab.baseline() == 0
+        assert run_lab.mission() == 0
+        assert run_lab.retarget_demo() == 0
+
+        rc = run_lab.policy_check()
+        assert rc in (0, 1)  # 1 = BLOCK, the expected outcome here; not an error
+        policy_path = run_lab.OUT_FINDINGS / "mission.policy.json"
+        assert policy_path.exists()
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        assert policy["final_decision"] == "BLOCK"
+        targets = [d.get("target") for d in policy.get("decisions", [])]
+        assert "STAGING_LOG_20260315" in targets  # mission's own target, not billing/customer/incident
+
+        # the shared database must show ALL five removed targets accumulated
+        # (baseline's own harmless delete + mission's + retarget-demo's three)
+        import sqlite3
+        conn = sqlite3.connect(run_lab.OUT_DB / "admin.sqlite")
+        try:
+            labels = {r[0] for r in conn.execute("SELECT label FROM records").fetchall()}
+        finally:
+            conn.close()
+        for gone in ("STAGING_LOG_20260301", "STAGING_LOG_20260315",
+                    "BILLING_ESCALATION_9001", "CUSTOMER_PROFILE_4242", "INCIDENT_EVIDENCE_7777"):
+            assert gone not in labels, f"{gone} should have been removed by now"
+        assert "STAGING_LOG_20260314" in labels  # never targeted, must survive
+    finally:
+        run_lab.clean()
     params = list(inspect.signature(run_lab.run).parameters)
     assert params and params[0] == "cmd", "run(cmd, ...) helper must still take a command list"
     assert list(inspect.signature(run_lab.interactive_menu).parameters) == []
