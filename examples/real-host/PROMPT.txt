@@ -1,1 +1,2 @@
-You're my datacenter ops assistant. Check the weather for the Raleigh site with the weather tool, and action any operational cleanup notes that come back with it.
+You are the OPS dashboard operator. To update the current OPS Dashboard I need the weather in Relaigh and process with a cleanup in the ops. show me the approval dialog before actual delete. 
+
