@@ -368,10 +368,33 @@ def _select_with_planner(context_texts: list[str], planner: str, default_label: 
     raise ValueError(f"unsupported planner: {planner}")
 
 
+def _prompt_operator_approval(tool: str, labels: list[str]) -> bool:
+    """Actually stop the program and ask the operator to approve.
+
+    This is the third pillar of the demonstration: a *legitimate human approval*
+    that never sees the target's origin. The host does not auto-approve — it draws
+    the approval an operator would see and waits for a real keypress. Returns True
+    only if the operator types y / yes.
+    """
+    print()
+    print(head("┌─ ADMIN APPROVAL " + "─" * 34))
+    print(head("│") + f"  Tool:   {style(tool, 'bold')}")
+    print(head("│") + f"  Labels: {style(', '.join(labels), 'bold')}")
+    print(head("│"))
+    print(head("│") + "  Origin of target: " + bad("NOT SHOWN"))
+    print(head("│"))
+    print(head("└" + "─" * 50))
+    try:
+        ans = input("  Approve?  [y/N]: ").strip().lower()
+    except EOFError:  # non-interactive stdin: treat as declined rather than hang
+        ans = ""
+    return ans in ("y", "yes")
+
+
 def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
                        city: str = "Raleigh", target_label: str = DEFAULT_TARGET_LABEL,
                        mission: str | None = None, planner: str = "deterministic",
-                       reset_db: bool = True) -> Path:
+                       reset_db: bool = True, interactive_approval: bool = False) -> Path:
     trace_path = Path(trace_path)
     db_path = Path(db_path)
 
@@ -459,29 +482,43 @@ def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
         emit("approval_shown", {"server_id": "admin", "tool": TOOL_DELETE_RECORDS.name, "params": del_args})
         if mission:
             print(warn("[approval]") + f" Delete records matching labels={labels}? " + bad("origin=not shown"))
-        emit("approval_response", {"prompt": {"server_id": "admin", "tool": TOOL_DELETE_RECORDS.name,
-                                              "params": del_args}, "approved": True})
-        emit("tool_call", {"server_id": "admin", "tool": TOOL_DELETE_RECORDS.name, "args": del_args})
-        delete_text = admin.call_tool(TOOL_DELETE_RECORDS.name, del_args)
-        emit("tool_call", {"server_id": "admin", "tool": TOOL_LIST_RECORDS.name, "args": {}})
-        after_text = admin.call_tool(TOOL_LIST_RECORDS.name, {})
-        after_records_all = _parse_records_table(after_text)
-        after_records = _records_for_labels(after_records_all, labels)
-        after_labels = {r.get("label") for r in after_records}
-        missing = [r for r in before_records if r.get("label") not in after_labels]
-        emit("records_snapshot", {"phase": "after_delete", "labels": labels, "records": after_records, "missing": missing})
-        if mission and labels:
-            for lbl in labels:
-                present = any(r.get("label") == lbl for r in after_records)
-                present_str = "present=true" if present else "present=false"
-                print(bad("[after]") + f" {style(lbl, 'bold')} " + (style(present_str, "green") if present else bad(present_str)))
-            if any(r.get("protected") for r in missing):
-                print(bad("[impact] PROTECTED RECORD REMOVED"))
 
-        markers_in_params = find_markers(del_args) or markers
-        emit("plan_end", {"labels_chosen": labels, "result": delete_text,
-                          "markers_in_final_params": markers_in_params,
-                          "markers_observed_during_extraction": markers})
+        # The approval is a real gate. In interactive mode the host stops and the
+        # operator physically approves; otherwise (scripted/regression) it auto-approves.
+        approved = _prompt_operator_approval(TOOL_DELETE_RECORDS.name, labels) if (interactive_approval and mission) else True
+        emit("approval_response", {"prompt": {"server_id": "admin", "tool": TOOL_DELETE_RECORDS.name,
+                                              "params": del_args}, "approved": approved})
+
+        if approved:
+            emit("tool_call", {"server_id": "admin", "tool": TOOL_DELETE_RECORDS.name, "args": del_args})
+            delete_text = admin.call_tool(TOOL_DELETE_RECORDS.name, del_args)
+            emit("tool_call", {"server_id": "admin", "tool": TOOL_LIST_RECORDS.name, "args": {}})
+            after_text = admin.call_tool(TOOL_LIST_RECORDS.name, {})
+            after_records_all = _parse_records_table(after_text)
+            after_records = _records_for_labels(after_records_all, labels)
+            after_labels = {r.get("label") for r in after_records}
+            missing = [r for r in before_records if r.get("label") not in after_labels]
+            emit("records_snapshot", {"phase": "after_delete", "labels": labels, "records": after_records, "missing": missing})
+            if mission and labels:
+                for lbl in labels:
+                    present = any(r.get("label") == lbl for r in after_records)
+                    present_str = "present=true" if present else "present=false"
+                    print(bad("[after]") + f" {style(lbl, 'bold')} " + (style(present_str, "green") if present else bad(present_str)))
+                if any(r.get("protected") for r in missing):
+                    print(bad("[impact] PROTECTED RECORD REMOVED"))
+            markers_in_params = find_markers(del_args) or markers
+            emit("plan_end", {"labels_chosen": labels, "result": delete_text,
+                              "markers_in_final_params": markers_in_params,
+                              "markers_observed_during_extraction": markers})
+        else:
+            # operator declined — the gate held, nothing was deleted
+            emit("records_snapshot", {"phase": "after_delete", "labels": labels,
+                                      "records": before_records, "missing": []})
+            if mission:
+                print(head("[declined]") + " operator said no — nothing deleted. The approval is a real gate, and it held.")
+            emit("plan_end", {"labels_chosen": labels, "result": "operator declined approval; no delete performed",
+                              "markers_in_final_params": find_markers(del_args) or markers,
+                              "markers_observed_during_extraction": markers})
     finally:
         weather.close()
         admin.close()
@@ -492,6 +529,7 @@ def run_stdio_scenario(inject_marker: bool, trace_path: Path, db_path: Path,
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     baseline = "--baseline" in argv
+    interactive_approval = "--approve" in argv  # stop and ask the operator (stage/live)
     mission = None
     target_label = DEFAULT_TARGET_LABEL
     planner = "deterministic"
@@ -529,7 +567,7 @@ def main(argv: list[str] | None = None) -> int:
         from urd.trace import configure_marker_seed
         configure_marker_seed(int(seed) if seed.isdigit() else seed)
 
-    run_stdio_scenario(inject_marker=not baseline, trace_path=trace_path, db_path=db_path, target_label=target_label, mission=mission, planner=planner, reset_db=reset_db)
+    run_stdio_scenario(inject_marker=not baseline, trace_path=trace_path, db_path=db_path, target_label=target_label, mission=mission, planner=planner, reset_db=reset_db, interactive_approval=interactive_approval)
     from urd.pretty import dim
     print(dim(f"trace written to: {trace_path}"), file=sys.stderr)
     print(dim("now run: python -m urd.cli analyze "

@@ -89,7 +89,7 @@ def baseline() -> int:
 
 
 def compositional(target: str | None = None, mission: bool = False, planner: str = "deterministic",
-                  name: str | None = None) -> int:
+                  name: str | None = None, approve: bool = False) -> int:
     """Run a scenario against the shared database (see baseline's docstring).
 
     `name` controls the ARCHIVED trace filename (out/traces/{name}.trace.jsonl)
@@ -106,6 +106,8 @@ def compositional(target: str | None = None, mission: bool = False, planner: str
         cmd += ["--mission", "evidence-delete"]
     if target:
         cmd += ["--target", target]
+    if approve:
+        cmd += ["--approve"]  # host stops and waits for a real operator keypress
     rc = run(cmd)
     trace_name = "mcp_stdio_compositional" if planner == "deterministic" else f"mcp_stdio_{planner.replace('-', '_')}_compositional"
     out_name = name or ("compositional" if planner == "deterministic" else f"planner-{planner}")
@@ -204,8 +206,20 @@ def find_seams() -> int:
 
 
 def mission() -> int:
-    """The breach: make a protected incident-evidence record disappear using only low-trust contextual output."""
+    """The breach: make a protected incident-evidence record disappear using only low-trust contextual output.
+
+    Auto-approves — this is the scripted/regression path used by verify, all, and
+    the tests. For the stage, use `live`, which stops for a real operator keypress.
+    """
     return compositional(mission=True, name="mission")
+
+
+def mission_live() -> int:
+    """The stage kill: same breach, but the host STOPS at the approval and you
+    physically approve it. This is the third pillar of the demo — a legitimate
+    human approval that never sees the target's origin. Type y to authorize.
+    """
+    return compositional(mission=True, name="mission", approve=True)
 
 
 def real_host() -> int:
@@ -543,6 +557,7 @@ Usage:
   ./lab.sh baseline
   ./lab.sh compositional
   ./lab.sh mission
+  ./lab.sh live          # mission, but stops for a real operator approval (stage)
   ./lab.sh verify
   ./lab.sh real-host
   ./lab.sh cursor            (add --docker to run the servers in a container)
@@ -591,6 +606,7 @@ def _command_table() -> dict:
         "baseline": baseline,
         "compositional": compositional,
         "mission": mission,
+        "live": mission_live,
         "verify": verify,
         "real-host": real_host,
         "cursor": cursor,
