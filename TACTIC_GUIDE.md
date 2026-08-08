@@ -97,6 +97,8 @@ Open `out/findings/baseline.findings.json` (or `examples/findings/baseline.findi
 
 Watch the terminal output for two lines: the approval line says `origin=not shown` — that's the entire vulnerability in three words, the approval tells you *what* is being deleted and never *who chose it*. And the after-line says `present=false` — the protected record is gone.
 
+> **Approve it yourself.** On your own laptop (or any fresh clone of the repo), run `./lab.sh live` instead of `./lab.sh mission`. The host *stops* at the approval and waits — you physically type `y` to authorize the delete, exactly as an operator would, and you'll see `Origin of target: NOT SHOWN` in the prompt. Type anything else and the record is spared, proving the approval is a real gate. (The pre-deployed range here may not have `live`; `mission` auto-approves and shows the same result.)
+
 If you want to see it on the wire, open `examples/traces/compositional.trace.jsonl` and find three sequence numbers:
 
 ```text
